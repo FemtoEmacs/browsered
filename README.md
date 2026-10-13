@@ -129,8 +129,13 @@ WebAssembly inside the page. GitHub Pages publishes it from this repository
 In Edge, choose **Apps > Install Browsered** (or the install icon in the
 address bar) to get its own window, a Start menu entry and offline use.
 
-Without Browsered.app the Claude and ChatGPT buttons open those websites,
-and there is no PDF generation. Open and Save use Edge's file dialogs. The
+Without Browsered.app, the Claude and ChatGPT buttons (Ctrl+H R, Ctrl+H G)
+open the same request box, but the page sends the request straight to the
+Anthropic or OpenAI API with your own API key, entered once in the box and
+kept only in that browser. API use is billed by the provider, separately
+from a Claude or ChatGPT subscription; the subscriptions (through Claude Code
+and Codex) are used only by Browsered.app. Requested PDFs open as a page
+to save with the print dialog's "Save as PDF". Open and Save use Edge's file dialogs. The
 init file lives in the browser: M-x `choose-init-file` loads one from disk,
 M-x `use-buffer-as-init` makes the text you are editing the init file, and
 M-x `forget-init-file` returns to the example `init.scm`.
