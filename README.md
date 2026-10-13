@@ -121,6 +121,26 @@ The editing API follows Emacs Lisp. Positions count characters from 1, so
 A Scheme command edits the document as one change, so one Ctrl+/ undoes it.
 Scripts run only in the Browsered editor page, not through the extension.
 
+## Windows
+
+`Browsered-Setup-<version>.exe`, from the repository's Releases page,
+installs Browsered for the current user (no administrator rights) with
+Start menu entries: **Browsered**, **Quit Browsered** and **Browsered init
+file**. Like Browsered.app, it runs a small helper on 127.0.0.1 that opens
+the editor in the default browser and runs Claude Code (`claude`) and Codex
+(`codex`) for the request box, using your subscriptions; install and log in
+to them first. Requested PDFs open as a page to save with "Save as PDF".
+The init file is `%APPDATA%\Browsered\init.scm`; upgrades and uninstalling
+leave it in place. A portable zip contains the same files.
+
+The installer is not signed yet: Windows SmartScreen says "Windows protected
+your PC"; choose **More info**, then **Run anyway**.
+
+To publish a release, push a tag: `git tag v0.1.0 && git push origin v0.1.0`.
+The **Windows installer** workflow builds `browsered.exe` with mingw-w64
+(`windows/browsered-win.c`), packs it with Inno Setup
+(`windows/browsered.iss`) and attaches both files to the release.
+
 ## Use it in Edge or Chrome (Windows, Linux, ChromeOS)
 
 The editor also runs as a web page, with nothing to install: femtoscheme is

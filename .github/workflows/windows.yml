@@ -1,0 +1,70 @@
+# Build the Windows installer. Push a tag such as v0.1.0 to publish a
+# GitHub Release with it; "Run workflow" builds it as a downloadable artifact.
+name: Windows installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  stage:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: version
+        run: |
+          if [ "$GITHUB_REF_TYPE" = tag ]; then v="${GITHUB_REF_NAME#v}"; else v="0.1.0"; fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - name: Tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sbcl gcc-mingw-w64-x86-64
+      - name: Test femtoscheme
+        run: make -C femtoscheme
+      - name: Build the standalone page
+        run: sbcl --script build-standalone.lisp
+      - name: Build browsered.exe and stage the files
+        run: BROWSERED_VERSION=${{ steps.version.outputs.version }} windows/build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-stage
+          path: windows/stage
+
+  installer:
+    needs: stage
+    runs-on: windows-latest
+    env:
+      BROWSERED_VERSION: ${{ needs.stage.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-stage
+          path: windows/stage
+      - name: Build the installer and the portable zip
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc windows\browsered.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Compress-Archive -Path windows\stage\* -DestinationPath "windows\dist\Browsered-$env:BROWSERED_VERSION-portable.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Browsered-Windows-${{ env.BROWSERED_VERSION }}
+          path: windows/dist/*
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" (Get-ChildItem windows\dist\*).FullName `
+            --title "Browsered $env:GITHUB_REF_NAME" `
+            --notes "Windows: run Browsered-Setup-$env:BROWSERED_VERSION.exe (no administrator rights needed). If SmartScreen says 'Windows protected your PC', choose More info, then Run anyway."

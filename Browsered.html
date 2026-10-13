@@ -666,12 +666,23 @@ footer {
       }
       assistantResult.textContent = result.reply;
 
+      let printPdf = !nativeHelper;
       for (let artifact of result.artifacts) {
         if (typeof artifact.content !== "string" || typeof artifact.name !== "string") continue;
-        let file;
-        if (artifact.format === "pdf" && !nativeHelper) {
-          // No PDF renderer on the website: a printable page; choose
-          // "Save as PDF" in the print dialog.
+        let file = null;
+        if (artifact.format === "pdf" && !printPdf) {
+          const rendered = await fetch("/pdf", {
+            method: "POST",
+            headers: {"Content-Type": "text/plain;charset=utf-8"},
+            body: artifact.content
+          });
+          // 501: a helper without a PDF renderer (Windows) -- print instead
+          if (rendered.status === 501) printPdf = true;
+          else if (!rendered.ok) throw new Error("Não foi possível finalizar o PDF.");
+          else file = await rendered.blob();
+        }
+        if (artifact.format === "pdf" && printPdf) {
+          // A printable page; choose "Save as PDF" in the print dialog.
           const name = artifact.name.replace(/[\\/]/g, "_").replace(/\.pdf$/i, "");
           const page = new Blob([printablePage(name, artifact.content)], {type: "text/html;charset=utf-8"});
           const url = URL.createObjectURL(page);
@@ -683,20 +694,10 @@ footer {
           open.style.cssText = "display:inline-block;margin:12px 8px 0 0";
           assistantResult.appendChild(document.createElement("br"));
           assistantResult.appendChild(open);
-          const markdown = new Blob([artifact.content], {type: "text/markdown;charset=utf-8"});
-          file = markdown;
+          file = new Blob([artifact.content], {type: "text/markdown;charset=utf-8"});
           artifact = {...artifact, name: name + ".md"};
-        } else if (artifact.format === "pdf") {
-          const rendered = await fetch("/pdf", {
-            method: "POST",
-            headers: {"Content-Type": "text/plain;charset=utf-8"},
-            body: artifact.content
-          });
-          if (!rendered.ok) throw new Error("Não foi possível finalizar o PDF.");
-          file = await rendered.blob();
-        } else {
-          file = new Blob([artifact.content], {type: "text/plain;charset=utf-8"});
         }
+        if (!file) file = new Blob([artifact.content], {type: "text/plain;charset=utf-8"});
         const url = URL.createObjectURL(file);
         artifactURLs.push(url);
         const download = document.createElement("a");

@@ -13,3 +13,6 @@ tests/pdf-tests
 /output/
 .DS_Store
 *~
+/windows/stage/
+/windows/build/
+/windows/dist/
