@@ -1,0 +1,15 @@
+# Build products
+/Browsered.app/
+/site/
+femtoscheme/*.o
+femtoscheme/*.a
+femtoscheme/femtoscheme
+femtoscheme/femtoscheme.boot.bak
+femtoscheme/femtoscheme.boot.new
+femtoscheme/llt/*.o
+femtoscheme/llt/*.a
+tests/pdf-tests
+# Generated documents
+/output/
+.DS_Store
+*~

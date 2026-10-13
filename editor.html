@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Browsered</title>
+    <meta name="theme-color" content="#176b46">
+    <link rel="manifest" href="manifest.webmanifest">
+    <link rel="icon" href="icons/icon-192.png" type="image/png">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="stylesheet" href="editor.css">
+  </head>
+  <body>
+    <header>
+      <h1>Browsered</h1>
+      <span class="subtitle">Emacs keys in a plain text editor</span>
+      <span id="saved" role="status"></span>
+      <button id="save">Save</button>
+      <!-- keys.js puts the help and AI buttons in this toolbar slot. -->
+      <div id="browsered-toolbar-slot"></div>
+    </header>
+    <main>
+      <textarea id="editor" aria-label="Document" placeholder="Write here" spellcheck="true"></textarea>
+    </main>
+    <footer>Ctrl+H: all keybindings · Ctrl+X Ctrl+F open · Ctrl+X Ctrl+S save · Ctrl+S search · Ctrl+Space mark · Alt+W copy · Ctrl+W cut · Ctrl+Y paste · Ctrl+H R Claude · M-x commands · M-: Scheme</footer>
+    <script src="keys.js"></script>
+    <!-- Scheme scripting: femtoscheme compiled to WebAssembly (see femtoscheme/). -->
+    <script src="femtoscheme/wasm/femtoscheme.js"></script>
+    <script src="scheme.js"></script>
+    <script src="editor.js"></script>
+    <script type="text/x-scheme" id="browsered-editor-scm" src="editor.scm"></script>
+  </body>
+</html>

@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["reply", "artifacts"],
+  "properties": {
+    "reply": {"type": "string"},
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["name", "format", "content"],
+        "properties": {
+          "name": {"type": "string"},
+          "format": {"type": "string", "enum": ["pdf", "txt", "md", "csv", "html"]},
+          "content": {"type": "string"}
+        }
+      }
+    }
+  }
+}

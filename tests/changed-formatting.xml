@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Dimensions and font sizes are in points. Changes apply to the next PDF. -->
+<markdown-pdf version="1">
+  <page width="420" height="841.89" margin="72"/>
+  <style element="paragraph" font="TimesNewRomanPSMT" size="12" line-height="18" space-after="10" indent="24" align="justify"/>
+  <style element="heading1" font="TimesNewRomanPS-BoldMT" size="30" line-height="36" space-after="16" indent="0" align="left"/>
+  <style element="heading2" font="TimesNewRomanPS-BoldMT" size="18" line-height="23" space-after="14" indent="0" align="left"/>
+  <style element="heading3" font="TimesNewRomanPS-BoldMT" size="15" line-height="20" space-after="12" indent="0" align="left"/>
+  <style element="heading4" font="TimesNewRomanPS-BoldMT" size="13" line-height="18" space-after="10" indent="0" align="left"/>
+  <style element="heading5" font="TimesNewRomanPS-BoldMT" size="12" line-height="18" space-after="10" indent="0" align="left"/>
+  <style element="heading6" font="TimesNewRomanPS-BoldItalicMT" size="12" line-height="18" space-after="10" indent="0" align="left"/>
+  <style element="code" font="Menlo-Regular" size="10" line-height="15" space-after="10" indent="0" align="left"/>
+  <style element="list" font="TimesNewRomanPSMT" size="12" line-height="18" space-after="6" indent="18" align="left"/>
+  <style element="quote" font="TimesNewRomanPS-ItalicMT" size="12" line-height="18" space-after="10" indent="24" align="left"/>
+  <style element="table" font="TimesNewRomanPSMT" size="11" line-height="17" space-after="6" indent="0" align="left"/>
+  <style element="rule" font="TimesNewRomanPSMT" size="12" line-height="18" space-after="10" indent="0" align="left"/>
+  <inline element="strong" bold="true"/>
+  <inline element="emph" italic="true"/>
+  <inline element="code" font="Menlo-Regular"/>
+</markdown-pdf>

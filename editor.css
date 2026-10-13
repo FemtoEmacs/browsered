@@ -1,0 +1,65 @@
+/* Keep the editor a normal textarea so browser tools can check its text. */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  color: #202a25;
+  background: #f4f6f4;
+  font: 16px system-ui;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px;
+}
+
+h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.subtitle {
+  flex: 1;
+}
+
+button {
+  font: inherit;
+  background: #176b46;
+  color: white;
+  border: 0;
+  border-radius: 6px;
+  padding: 9px 14px;
+  cursor: pointer;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+}
+
+textarea {
+  display: block;
+  width: 100%;
+  height: calc(100vh - 155px);
+  min-height: 320px;
+  resize: vertical;
+  padding: 28px;
+  border: 1px solid #b3bdb5;
+  border-radius: 8px;
+  background: white;
+  font: 20px/1.7 Georgia, serif;
+  outline-color: #176b46;
+}
+
+footer {
+  padding: 18px;
+  text-align: center;
+  color: #536258;
+  font-size: 14px;
+}

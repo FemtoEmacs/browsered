@@ -1,0 +1,46 @@
+# Publish the editor to GitHub Pages on every push to main.
+# Repository settings > Pages > Source: "GitHub Actions".
+name: Publish Browsered
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test femtoscheme
+        run: make -C femtoscheme
+      - name: Build the standalone page
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sbcl
+          sbcl --script build-standalone.lisp
+      - name: Assemble the site
+        run: web/build-site.sh site
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
