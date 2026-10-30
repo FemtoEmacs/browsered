@@ -23,9 +23,9 @@ CPPFLAGS += -Isrc -Ifemtoscheme -Ifemtoscheme/llt
 #   gui.c, irene-dixe.c, app.c  Schememax's window and plot programs, and
 #             its main(), compiled below for each target
 CORE = $(filter-out src/term.c src/gui.c src/app.c src/irene-dixe.c src/web.c \
-                    src/web-main.c src/web-scheme.c src/web-sdl.c src/web-irene-main.c, \
+                    src/web-main.c src/web-scheme.c src/web-layer.c src/web-fast.c src/web-sdl.c src/web-irene-main.c, \
                     $(wildcard src/*.c))
-WEB = src/web.c src/web-main.c src/web-scheme.c
+WEB = src/web.c src/web-main.c src/web-scheme.c src/web-layer.c src/web-fast.c
 FEMTO = $(addprefix femtoscheme/, flisp.c builtins.c string.c equalhash.c table.c iostream.c)
 LLT = $(addprefix femtoscheme/llt/, bitvector.c hashing.c socket.c timefuncs.c ptrhash.c \
         utf8.c ios.c dirpath.c htable.c bitvector-ops.c int2str.c dump.c random.c lltinit.c)
@@ -83,7 +83,7 @@ build/app.o: src/app.c src/header.h
 
 build/core.js: build/app.o $(CORE) $(WEB) $(FEMTO) $(LLT) src/header.h src/screen.h \
                web/browsered.js femtoscheme/femtoscheme.boot $(SCRIPTS)
-	$(EMCC) $(EMFLAGS) -Wl,--wrap=getfilename -Wl,--wrap=line_edit $(CORE) $(WEB) build/app.o $(FEMTO) $(LLT) -o $@ \
+	$(EMCC) $(EMFLAGS) -Wl,--wrap=getfilename -Wl,--wrap=getfilename_default -Wl,--wrap=line_edit $(CORE) $(WEB) build/app.o $(FEMTO) $(LLT) -o $@ \
 	    --pre-js web/browsered.js \
 	    --embed-file femtoscheme/femtoscheme.boot@/femtoscheme/femtoscheme.boot \
 	    --embed-file scheme@/scheme --exclude-file '*/bkp/*' \
@@ -101,13 +101,19 @@ build/irene-dixe.js: src/irene-dixe.c src/web-sdl.c src/web-irene-main.c web/sdl
 	    -s ALLOW_MEMORY_GROWTH=1 -s FORCE_FILESYSTEM=1 -s EXPORTED_FUNCTIONS=_main,_malloc \
 	    -s EXPORTED_RUNTIME_METHODS=FS,UTF8ToString,stringToUTF8,lengthBytesUTF8
 
+# Schemer uses a separate compiler VM so its expander cannot shadow editor macros.
 # one page: web/shell.html with the program in place of {{{ SCRIPT }}}
-Browsered.html: build/core.js build/irene-dixe.js web/shell.html web/vendor/pdf.min.js web/vendor/pdf.worker.min.js
+Browsered.html: build/core.js build/irene-dixe.js schemer/compiler.wasm $(wildcard schemer/*) web/schemer.js web/shell.html web/vendor/pdf.min.js web/vendor/pdf.worker.min.js
 	sed -n '1,/{{{ SCRIPT }}}/p' web/shell.html | sed '$$d' > $@.new
 	printf '<script>\n' >> $@.new
 	cat build/core.js >> $@.new
 	printf '\n</script>\n<script>\n' >> $@.new
 	cat build/irene-dixe.js >> $@.new
+	printf '\n</script>\n<script>\n' >> $@.new
+	cat schemer/host.js web/schemer.js >> $@.new
+	printf '\n</script>\n<script type="text/plain" id="schemer-compiler-wasm">\n' >> $@.new
+	base64 < schemer/compiler.wasm | tr -d '\n' >> $@.new
+	printf '\n</script>\n<script>\n' >> $@.new
 	printf '\n</script>\n<script>\n' >> $@.new
 	cat web/vendor/pdf.min.js >> $@.new
 	printf '\n</script>\n<script type="text/plain" id="pdf-worker">\n' >> $@.new
@@ -139,10 +145,24 @@ check: browsered-term
 
 check-web: Browsered.html codex-bridge
 	node tests/web-test.js
+	node tests/startup-errors-test.js
 	node tests/document-editor-test.js
+	node tests/writing-keys-test.js
+	node tests/writing-search-test.js
+	node tests/text-layer-test.js
+	node tests/fast-test.js
 	node tests/entrypoint-test.js
 	node tests/shell-folder-test.js
+	node tests/shell-tab-test.js
 	node tests/safari-files-test.js
+	node tests/save-as-test.js
+	node tests/comment-test.js
+	node tests/search-input-test.js
+	node tests/buffer-menu-test.js
+	node tests/file-info-test.js
+	node tests/claude-bridge-page-test.js
+	node tests/schemer-test.js
+	node tests/assistant-commands-test.js
 
 # Take Schememax's core and scripts, from GitHub (FemtoEmacs/sbcl-rasp)
 # into build/sbcl-rasp, never from the user's own folders; SCHEMEMAX=path

@@ -19,7 +19,7 @@ const fs = require('fs'), path = require('path'), http = require('http'), assert
     await page.goto('http://127.0.0.1:' + server.address().port + '/');
     await page.waitForSelector('#screen');
     assert.equal(await page.locator('#editor').count(), 0, 'Startup must stay in the advanced editor');
-    await page.getByRole('button', {name:'Writing / Grammarly', exact:true}).click();
+    await page.keyboard.press('Escape');await page.keyboard.press('x');await page.keyboard.insertText('document-editor');await page.keyboard.press('Enter');   // M-x document-editor: the old writing view (C-c d is the Grammarly pane)
     await page.waitForSelector('#editor');
     assert.equal(await page.getByRole('button', {name:'Apply and return', exact:true}).count(), 0);
     assert.equal(await page.locator('#editor').getAttribute('spellcheck'), 'true');
@@ -38,7 +38,8 @@ const fs = require('fs'), path = require('path'), http = require('http'), assert
     await page.locator('#editor').fill('This page contains an error.');
     assert.equal(await page.evaluate(() => window.testWrites.length), 0, 'A writing correction must not save by itself');
     await page.screenshot({path:'build/default-document.png'});
-    await page.getByRole('button', {name:'Save', exact:true}).click();
+    await page.keyboard.press('Control+x');
+    await page.keyboard.press('Control+s');
     await page.waitForSelector('#editor');
     await page.waitForFunction(() => window.testWrites.length === 1);
     assert.equal(await page.evaluate(() => window.testWrites[0]), 'This page contains an error.');
@@ -51,15 +52,20 @@ const fs = require('fs'), path = require('path'), http = require('http'), assert
     assert.equal(await page.locator('#editor').inputValue(), 'This page contains an error.');
     await page.getByRole('button', {name:'Advanced editor', exact:true}).click();
     await page.locator('#writing-mode').waitFor({state:'detached'});
-    await page.getByRole('button', {name:'Writing / Grammarly', exact:true}).click();
+    await page.keyboard.press('Escape');await page.keyboard.press('x');await page.keyboard.insertText('document-editor');await page.keyboard.press('Enter');   // M-x document-editor: the old writing view (C-c d is the Grammarly pane)
     await page.waitForSelector('#editor');
     assert.equal(await page.locator('#editor').inputValue(), 'This page contains an error.');
     await page.locator('#editor').fill('Unsaved draft');
-    page.once('dialog', d => d.dismiss());
+    // the question is asked in the page (y or n), never in a browser dialog
+    let dialogs = 0; page.on('dialog', d => { dialogs++; d.dismiss(); });
     await page.getByRole('button', {name:'Quit', exact:true}).click();
+    await page.getByRole('alert').filter({hasText:'quit without saving? (y or n)'}).waitFor();
+    await page.keyboard.press('n');
     assert.equal(await page.locator('#editor').inputValue(), 'Unsaved draft');
-    page.once('dialog', d => d.accept());
-    await page.getByRole('button', {name:'Quit', exact:true}).click();
+    await page.keyboard.press('Control+x'); await page.keyboard.press('Control+c');
+    await page.getByRole('alert').filter({hasText:'quit without saving? (y or n)'}).waitFor();
+    await page.keyboard.press('y');
+    assert.equal(dialogs, 0, 'no browser dialog');
     await page.waitForSelector('#editor-closed');
     assert.deepEqual(errors, []);
     console.log('all document editor tests passed (advanced startup, optional textarea, open, corrections, explicit save, Codex, advanced mode, unsaved quit)');

@@ -450,6 +450,8 @@ on the kill ring and make it what C-y inserts."
                      ((string=? kind "select") (run-hook '*select-hook*))
                      ((string=? kind "complete-file")
                       (fe-set-completions (string-join (file-name-completions arg) "\n")))
+                     ((string=? kind "complete-command")
+                      (fe-set-completions (string-join (shell-command-completions arg) "\n")))
                      ((string=? kind "kill") (run-hook '*kill-hook* arg))
                      ((string=? kind "startup") (run-startup))
                      ((string=? kind "colors") (apply-color-theme (string->number arg))))

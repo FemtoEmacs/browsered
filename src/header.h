@@ -368,6 +368,8 @@ extern void disassociate_b(window_t *);
 extern void hijack_window(window_t *, buffer_t *);
 extern void restore_hijacked_window(window_t *);
 extern int getfilename(char *, char *, int);
+extern int getfilename_default(char *, char *, int);
+extern int getcommand(char *, int);
 extern void unread_key_bytes(const char *, int);
 extern void scroll_window(int);
 extern int select_screen_window(int);

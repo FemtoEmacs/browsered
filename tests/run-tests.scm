@@ -313,6 +313,41 @@
                (and (string=? text (apply string-append (wrap-test-rows text w))) (loop (+ w 1))))))
        #t)
 
+(check "comment marker in Scheme string is ignored"
+       (line-comment-position "(display \";\") ; real" 0 "a.scm") 14)
+(check "C comment marker in string is ignored"
+       (line-comment-position "puts(\"//\"); // real" 0 "a.c") 12)
+(check "comment search respects the current line"
+       (line-comment-position "; old\n(foo)" 6 "a.scm") #f)
+
+(check "buffer menu resolves full long names"
+       (bufm-name-from-line "   1234567 a very long buffer name.scm /tmp/file" '("a very long buffer name.scm" "a very"))
+       "a very long buffer name.scm")
+(check "buffer menu resolves Unicode names"
+       (bufm-name-from-line "        10 café.scm         /tmp/café.scm" '("café.scm")) "café.scm")
+(check "buffer menu refuses an unknown listing name"
+       (bufm-name-from-line "        10 missing.scm      /tmp/file" '("known.scm")) "")
+
+(check "format-time accepts modern timestamps"
+       (string-length (format-time 1739365794)) 16)
+(check "format-time accepts timestamps beyond signed int32"
+       (string-length (format-time 2200000000)) 16)
+(check "format-time keeps epoch and negative timestamps"
+       (map (lambda (stamp) (string-length (format-time stamp))) '(0 -1)) '(16 16))
+(check "format-time rejects non-integers"
+       (trycatch (begin (format-time "not a timestamp") #f) (lambda (e) #t)) #t)
+
+(check "shell completion respects open quotes"
+       (shell-completion-context "cd \"my dir/fi") '("cd " "my dir/fi" ("cd")))
+(check "shell completion respects escaped spaces"
+       (shell-completion-context "cat my\\ file") '("cat " "my file" ("cat")))
+(check "shell completion resets command after pipe"
+       (shell-completion-context "echo x | cd ~/ed") '("echo x | cd " "~/ed" ("cd")))
+(check "shell completion escapes spaces and metacharacters"
+       (shell-escape-token "my file;$x") "my\\ file\\;\\$x")
+(check "shell completion common prefix preserves Unicode"
+       (shell-common-prefix '("cat café-a" "cat café-b")) "cat café-")
+
 ;;; key names: Emacs notation -> the C core's names, and back
 (check "normalize M-d" (normalize-key "M-d") "esc d")
 (check "normalize C-M-f" (normalize-key "C-M-f") "esc C-f")
@@ -345,6 +380,20 @@
 (check "forward sexp: quote and #\\(" (at forward-sexp-position "'(a #\\( b)" 0 #t) 10)
 (check "forward sexp: comment skipped" (at forward-sexp-position (lines "; x (" "(y)") 0 #t) 9)
 (check "forward sexp: end of list" (at forward-sexp-position "a)" 1 #t) #f)
+(check "forward sexp: comma advances" (at forward-sexp-position "a,b" 1 #f) 2)
+(check "forward sexp: semicolon advances" (at forward-sexp-position "a;b" 1 #f) 2)
+(check "forward sexp: trailing comma" (at forward-sexp-position "a," 1 #f) 2)
+(check "backward sexp: comma advances" (at backward-sexp-position "a,b" 2 #f) 1)
+(check "backward sexp: semicolon advances" (at backward-sexp-position "a;b" 2 #f) 1)
+(check "Lisp comma remains an unquote prefix" (at forward-sexp-position ",@foo" 0 #t) 5)
+(check "punctuation motion always advances"
+       (every (lambda (text)
+                (let ((get (octets-get text)) (size (length text)))
+                  (let loop ((pos 0))
+                    (if (= pos size) #t
+                        (let ((next (forward-sexp-position get size pos #f)))
+                          (and next (> next pos) (loop next)))))))
+              '("one,two;three" "a,,b" "café,ação" "; ,")) #t)
 (check "backward sexp: list" (at backward-sexp-position "x (a (b))" 9 #t) 2)
 (check "backward sexp: quoted" (at backward-sexp-position "x '(a)" 6 #t) 2)
 (check "backward sexp: string" (at backward-sexp-position "x \"a)\"" 6 #t) 2)

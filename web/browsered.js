@@ -9,7 +9,7 @@ Module.browsered = (function () {
   "use strict";
   var canvas = null, ctx = null;
   var family = "Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace";
-  var points = 15, cellW = 9, cellH = 18, ascent = 14, dpr = 1, pad = 4;
+  var points = 15, cellW = 9, cellH = 18, ascent = 14, dpr = 1, pad = 4, naturalW = 9;
   var nRows = 34, nCols = 100;
   var queue = [], waiting = null;
   var last = null, lastCursor = -1;
@@ -28,6 +28,7 @@ Module.browsered = (function () {
   function measure() {
     ctx.font = points * dpr + "px " + family;
     var m = ctx.measureText("MMMMMMMMMM");
+    naturalW = m.width / 10;
     cellW = Math.max(1, Math.round(m.width / 10));
     cellH = Math.round(points * dpr * 1.3);
     ascent = Math.round(points * dpr * 1.0);
@@ -145,6 +146,12 @@ Module.browsered = (function () {
     var k = baseKey(e);
 
     if (e.isComposing || e.key === "Dead" || e.key === "Process") return;
+    // Shortcuts bubble to document even after focus leaves #keys. Restore
+    // the text receiver too, otherwise prompts open but typed text is lost.
+    // Dialogs and the optional writing editor own their own input fields.
+    if (keysField && document.activeElement !== keysField && document.activeElement !== layer &&
+        !document.querySelector(".api-key-dialog, #writing-mode"))
+      focusKeys();
     if (cmd) {
       switch (k) {
       case "v": return;                 // the paste event follows
@@ -207,6 +214,127 @@ Module.browsered = (function () {
     var text = keysField.value;
     keysField.value = "";
     if (text) pushString(text.replace(/\r\n?/g, "\n"));
+  }
+
+  // The text Grammarly sees -----------------------------------------------
+  //
+  // Grammarly reads only text fields, never the canvas.  When the selected
+  // window holds prose, src/web-layer.c sends, after every redisplay, the
+  // window's rows and its text; textLayer lays a transparent text field
+  // with that text exactly over them.  The field takes the keys, but the
+  // editor stays the only editor: what is typed goes to the editor, as from
+  // #keys, and the field shows the editor's text again.  A change that no
+  // key made (Grammarly's correction) goes to the editor as
+  // (web-layer-edit ...) of web.scm, which applies it only if the buffer
+  // still holds the old text.  Anything unexpected removes the field.
+
+  var layer = null, layerInfo = null, layerShadow = "";
+  var layerTyping = false, layerComposing = false, layerSent = 0, layerTaken = 0;
+
+  function focusKeys() {
+    var f = layer && !finished ? layer : keysField;
+    if (f) f.focus({ preventScroll: true });
+  }
+
+  function removeLayer() {
+    if (!layer) return;
+    var had = document.activeElement === layer;
+    layer.remove(); layer = null; layerInfo = null;
+    if (had && keysField) keysField.focus({ preventScroll: true });
+  }
+
+  // the UTF-16 index of byte OFFSET of TEXT
+  function indexOfByte(text, offset) {
+    var bytes = 0, i = 0;
+    while (i < text.length && bytes < offset) {
+      var c = text.codePointAt(i);
+      bytes += c < 0x80 ? 1 : c < 0x800 ? 2 : c < 0x10000 ? 3 : 4;
+      i += c >= 0x10000 ? 2 : 1;
+    }
+    return i;
+  }
+
+  function placeCaret() {
+    var at = indexOfByte(layerShadow, layerInfo.point);
+    if (layer.selectionStart !== at || layer.selectionEnd !== at) layer.setSelectionRange(at, at);
+    layer.scrollTop = 0; layer.scrollLeft = 0;
+  }
+
+  function makeLayer() {
+    var t = document.createElement("textarea");
+    t.id = "text-layer";
+    t.setAttribute("aria-label", "The window's text, for Grammarly");
+    // no data-gramm, no data-enable-grammarly: any data-gramm, even "true",
+    // turns Grammarly off for the field (seen in Chrome, 2026-10-30)
+    t.addEventListener("keydown", function (e) {
+      var meta = e.altKey && optionIsMeta && !(e.getModifierState && e.getModifierState("AltGraph"));
+      if (!e.ctrlKey && !e.metaKey && !meta &&
+          (e.key.length === 1 || e.key === "Dead" || e.key === "Process")) layerTyping = true;
+    });
+    t.addEventListener("keyup", function () { if (!layerComposing) layerTyping = false; });
+    t.addEventListener("compositionstart", function () { layerComposing = true; layerTyping = true; });
+    t.addEventListener("compositionend", function () { layerComposing = false; takeLayerInput(); });
+    t.addEventListener("input", function (e) { if (!e.isComposing && !layerComposing) takeLayerInput(); });
+    t.addEventListener("mousedown", function (e) {   // a click is the editor's (and Grammarly's)
+      if (e.button === 0) { buttonDown = true; mouse(0, e, false); }
+    });
+    t.addEventListener("wheel", wheel, { passive: false });
+    document.body.appendChild(t);
+    return t;
+  }
+
+  function takeLayerInput() {
+    var now = layer.value, old = layerShadow, typed = layerTyping;
+    layerTyping = false;
+    if (now === old) return;
+    var p = 0, n = Math.min(now.length, old.length);
+    while (p < n && now.charCodeAt(p) === old.charCodeAt(p)) p++;
+    if (p > 0 && now.charCodeAt(p - 1) >= 0xD800 && now.charCodeAt(p - 1) <= 0xDBFF) p--;
+    var q = 0;
+    while (q < n - p && now.charCodeAt(now.length - 1 - q) === old.charCodeAt(old.length - 1 - q)) q++;
+    if (q > 0 && now.charCodeAt(now.length - q) >= 0xDC00 && now.charCodeAt(now.length - q) <= 0xDFFF) q--;
+    var added = now.slice(p, now.length - q), removed = old.slice(p, old.length - q);
+    // text put in at the cursor (dictation, the emoji picker, an input
+    // method) is typed too: the editor puts it there, or gives it to the
+    // minibuffer when that is asking
+    if (!removed && p === indexOfByte(old, layerInfo.point)) typed = true;
+    if (typed) {                      // a key: the editor's, as from #keys
+      layer.value = old; placeCaret();
+      if (added) pushString(added.replace(/\r\n?/g, "\n"));
+      return;
+    }
+    layerShadow = now;                // Grammarly's: the editor checks and applies it
+    layerSent++;
+    runScheme("(web-layer-edit " + schemeString(layerInfo.buffer) + " " + layerInfo.page + " " +
+              lengthBytesUTF8(old.slice(0, p)) + " " + schemeString(removed) + " " +
+              schemeString(added.replace(/\r\n?/g, "\n")) + ")");
+  }
+
+  function textLayer(json) {
+    var info = null;
+    try { info = json ? JSON.parse(json) : null; } catch (e) { info = null; }
+    try {
+      if (!info || finished || document.querySelector("#writing-mode")) { removeLayer(); return; }
+      if (!layer) layer = makeLayer();
+      var st = layer.style;
+      st.left = pad / dpr + "px";
+      st.top = (pad + info.top * cellH) / dpr + "px";
+      st.width = nCols * cellW / dpr + 0.5 + "px";   // the editor wraps at nCols
+      st.height = info.rows * cellH / dpr + "px";
+      st.font = points + "px " + family;
+      st.lineHeight = cellH / dpr + "px";
+      st.letterSpacing = (cellW - naturalW) / dpr + "px";   // the canvas's cells exactly
+      layerInfo = info;
+      // while the editor has not yet applied every correction sent, or a
+      // key is being composed, the field keeps what it has
+      if (layerSent !== layerTaken || layerComposing) return;
+      if (layer.value !== info.text) layer.value = info.text;
+      layerShadow = info.text;
+      placeCaret();
+      if (document.activeElement === keysField || document.activeElement === document.body) layer.focus({ preventScroll: true });
+    } catch (e) {
+      try { removeLayer(); } catch (e2) { layer = null; }
+    }
   }
 
   // Mouse, as gui.c's push_mouse() ----------------------------------------
@@ -942,6 +1070,34 @@ Module.browsered = (function () {
     }
   }
 
+  // Claude Code with the Claude subscription, through the same local
+  // launcher (tools/codex-bridge.c, /claude); the API key is not used.
+  function localBridge() { return location.protocol === "http:" && location.hostname === "127.0.0.1"; }
+  async function claudeBridge() {
+    if (!localBridge()) return null;
+    try {
+      var r = await fetch("/claude/status"), text = r.ok ? await r.text() : "";
+      var mark = "Browsered Claude bridge: ";
+      return text.indexOf(mark) === 0 ? text.slice(mark.length) : null;   // not some other server
+    }
+    catch (e) { return null; }
+  }
+  async function claudeAsk(req) {
+    if (!localBridge())
+      return JSON.stringify({ error: "Start Browsered.command to use your Claude subscription (or M-x set-claude-key for the API)." });
+    try {
+      var enc = new TextEncoder();
+      var body = (req.model || "") + "\n" + enc.encode(req.system).length + "\n" +
+        enc.encode(req.question).length + "\n" + req.system + req.question + req.context;
+      var response = await fetch("/claude", { method: "POST",
+        headers: { "content-type": "application/x-browsered-claude" }, body: body });
+      var text = await response.text();
+      return JSON.stringify(response.ok ? { answer: text } : { error: text || "The local Claude request failed." });
+    } catch (e) {
+      return JSON.stringify({ error: "Cannot reach the local bridge. Keep Browsered.command running. " + e.message });
+    }
+  }
+
   // {provider, key, model, system, prompt}: the prompt with the rendered pages
   async function ttfyAsk(json) {
     var req = JSON.parse(json), answer, body;
@@ -1045,7 +1201,7 @@ Module.browsered = (function () {
       dialog.append(form); document.body.append(dialog);
       function finish(value) {
         input.value = "";
-        dialog.remove(); keysField.focus();
+        dialog.remove(); focusKeys();
         resolve(value);
       }
       form.addEventListener("submit", function (e) { e.preventDefault(); finish(input.value.trim()); });
@@ -1061,13 +1217,65 @@ Module.browsered = (function () {
 
   // Grammarly needs actual editable DOM text, rather than painted cells.
   // Work on a draft, then return the result to the current Scheme buffer.
+  // Colours for the writing view (it cannot use the canvas editor's
+  // highlighter: that is Scheme, waiting meanwhile).  Colours only, no
+  // bold or italic, so that every character keeps the textarea's width.
+  function escapeHtml(s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function hl(kind, s) { return '<span class="hl-' + kind + '">' + escapeHtml(s) + "</span>"; }
+  var latexSections = /^\\(part|chapter|section|subsection|subsubsection|paragraph|subparagraph|title|caption)\*?$/;
+  function highlightLatex(text) {
+    var out = "", last = 0, m;
+    var re = /(%.*$)|(\\(?:begin|end)\s*\{[^}\n]*\})|(\\[a-zA-Z@]+\*?)|(\\.)|(\$\$[\s\S]*?\$\$|\$(?:\\.|[^$\\\n])*\$|\\\[[\s\S]*?\\\]|\\\([\s\S]*?\\\))|([{}\[\]])/gm;
+    while ((m = re.exec(text))) {
+      out += escapeHtml(text.slice(last, m.index));
+      out += m[1] ? hl("comment", m[0]) : m[2] ? hl("env", m[0]) :
+             m[3] ? hl(latexSections.test(m[0]) ? "section" : "command", m[0]) :
+             m[4] ? hl("escape", m[0]) : m[5] ? hl("math", m[0]) : hl("brace", m[0]);
+      last = re.lastIndex;
+      if (m[0] === "") re.lastIndex++;
+    }
+    return out + escapeHtml(text.slice(last));
+  }
+  function highlightMarkdownInline(line) {
+    var out = "", last = 0, m;
+    var re = /(`[^`]*`)|(\*\*[^*\n]+\*\*|__[^_\n]+__)|(\*[^*\s][^*\n]*\*|_[^_\s][^_\n]*_)|(\[[^\]\n]*\]\([^)\n]*\))|(\|)/g;
+    while ((m = re.exec(line))) {
+      out += escapeHtml(line.slice(last, m.index));
+      out += hl(m[1] ? "code" : m[2] ? "strong" : m[3] ? "em" : m[4] ? "link" : "pipe", m[0]);
+      last = re.lastIndex;
+    }
+    return out + escapeHtml(line.slice(last));
+  }
+  function highlightMarkdown(text) {
+    var fence = false;
+    return text.split("\n").map(function (line) {
+      if (/^\s*(```|~~~)/.test(line)) { fence = !fence; return hl("code", line); }
+      if (fence) return hl("code", line);
+      if (/^#{1,6}\s/.test(line)) return hl("heading", line);
+      if (/^\s*>/.test(line)) return hl("quote", line);
+      var list = /^(\s*)([-*+]|\d+[.)])(\s+)/.exec(line);
+      if (list) return escapeHtml(list[1]) + hl("list", list[2]) + escapeHtml(list[3]) + highlightMarkdownInline(line.slice(list[0].length));
+      return highlightMarkdownInline(line);
+    }).join("\n");
+  }
+  function writingLanguage(name) {
+    name = String(name || "").replace(/<\d+>$/, "");
+    if (/\.(tex|ltx|sty|cls|bib)$/i.test(name)) return highlightLatex;
+    if (/\.(md|markdown)$/i.test(name)) return highlightMarkdown;
+    return null;
+  }
+
   function writingMode(json) {
     var req = JSON.parse(json);
     return new Promise(function (resolve) {
       var panel = document.createElement("section"); panel.id = "writing-mode";
       if (req.persistent) { panel.className = "document-default"; document.body.classList.add("document-active"); }
       var bar = document.createElement("header");
-      var label = document.createElement("span"); label.textContent = req.name;
+      // the status line's first item, as the canvas editor's: the file's
+      // name (a button: its details on the message line), * when changed,
+      // and the cursor's line
+      var label = document.createElement("button"); label.type = "button"; label.className = "writing-name";
+      label.setAttribute("aria-label", "File: " + req.name);
       var apply = document.createElement("button"); apply.textContent = "Apply and return";
       var save = document.createElement("button"); save.textContent = "Save and return";
       var cancel = document.createElement("button"); cancel.textContent = "Cancel";
@@ -1100,13 +1308,51 @@ Module.browsered = (function () {
       text.id = req.persistent ? "editor" : "writing-text";
       text.setAttribute("aria-label", req.persistent ? "Document" : "Document for writing and Grammarly");
       text.placeholder = "Write here";
+      text.wrap = "off";
       text.spellcheck = true;
       if (!req.persistent) { text.setAttribute("data-enable-grammarly", "true"); text.setAttribute("data-gramm", "true"); }
       text.value = req.text;
       var help = document.createElement("p");
-      help.textContent = req.persistent ? (req.status || "Ready. Grammarly checks this document automatically when its extension is enabled.") :
-        "Grammarly can check this text field. Apply returns changes to the editor; Save also saves the file.";
-      panel.append(bar, text, help);
+      // the message line, as Emacs's: empty, unless there is something to
+      // say ("Saved."); the keys are in README.md and C-h, not here
+      help.className = "writing-message"; help.setAttribute("role", "status");
+      help.textContent = req.persistent ? (req.status || "") : "Apply returns your changes to the editor; Save also saves the file.";
+      var keyHelp = "Emacs keys: C-s/C-r or M-s/M-r search, C-x C-s save, C-x C-f open, C-x b buffer, C-c d the advanced editor, C-a/e, C-b/f, C-p/n, M-b/f, M-</>, C-v/M-v, C-k/y, C-SPC, C-w, M-w, M-d, C-/.";
+      help.title = keyHelp;   // shown only on pointing at the line
+      // a coloured copy of the text behind it: the textarea's own letters
+      // are transparent, its cursor, selection and Grammarly's marks are not
+      var area = text, colorize = writingLanguage(req.name);
+      if (colorize) {
+        area = document.createElement("div"); area.className = "writing-area";
+        var colors = document.createElement("pre"); colors.className = "writing-colors"; colors.setAttribute("aria-hidden", "true");
+        area.append(colors, text); text.classList.add("colored");
+        var colorFrame = 0;
+        var followScroll = function () { colors.scrollTop = text.scrollTop; colors.scrollLeft = text.scrollLeft; };
+        var paintColors = function () { colorFrame = 0; colors.innerHTML = colorize(text.value) + "\n "; followScroll(); };
+        text.addEventListener("input", function () { if (!colorFrame) colorFrame = requestAnimationFrame(paintColors); });
+        text.addEventListener("scroll", followScroll);
+        paintColors();
+      }
+      panel.append(bar, area, help);
+      var statusFrame = 0;
+      function drawStatus() {
+        statusFrame = 0;
+        var line = 1, upto = text.selectionStart, v = text.value;
+        for (var i = v.indexOf("\n"); i >= 0 && i < upto; i = v.indexOf("\n", i + 1)) line++;
+        var changed = req.modified || v !== req.text;
+        label.textContent = (changed ? "*" : "") + req.name + ", L. " + line;
+      }
+      function updateStatus() { if (!statusFrame) statusFrame = requestAnimationFrame(drawStatus); }
+      drawStatus();
+      for (var statusEvent of ["input", "keyup", "mouseup", "focus"]) text.addEventListener(statusEvent, updateStatus);
+      document.addEventListener("selectionchange", updateStatus);
+      label.addEventListener("click", function () { finish("file-info"); });
+      // a message stays until the next key or click, as in Emacs
+      function clearMessage(e) {
+        if (e && e.type === "keydown" && ["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+        if (help.textContent) help.textContent = "";
+      }
+      text.addEventListener("keydown", clearMessage); text.addEventListener("mousedown", clearMessage);
       if (req.reply) {
         var response = document.createElement("section"); response.className = "document-answer";
         var responseTitle = document.createElement("strong"); responseTitle.textContent = "ChatGPT";
@@ -1116,33 +1362,297 @@ Module.browsered = (function () {
         response.append(responseTitle, dismiss, answer); panel.append(response);
       }
       document.body.append(panel);
+      // A steady, high-contrast caret supplements the browser's thin caret.
+      // It is purely visual: Grammarly still edits the original textarea.
+      var writingCaret=document.createElement("span");writingCaret.className="writing-caret";writingCaret.setAttribute("aria-hidden","true");panel.append(writingCaret);
+      var caretFrame=0;
+      function caretMetrics(){
+        var style=getComputedStyle(text),rect=text.getBoundingClientRect(),before=text.value.slice(0,head()).split("\n");
+        var measure=document.createElement("canvas").getContext("2d");measure.font=style.font;
+        var column=0,expanded="";for(var ch of before[before.length-1]){if(ch==="\t"){var n=8-column%8;expanded+=" ".repeat(n);column+=n;}else{expanded+=ch;column++;}}
+        return {rect:rect,x:measure.measureText(expanded).width,y:(before.length-1)*parseFloat(style.lineHeight),height:parseFloat(style.lineHeight),left:parseFloat(style.paddingLeft)+parseFloat(style.borderLeftWidth),top:parseFloat(style.paddingTop)+parseFloat(style.borderTopWidth),right:parseFloat(style.paddingRight),bottom:parseFloat(style.paddingBottom)};
+      }
+      function drawWritingCaret(){
+        caretFrame=0;
+        if(!panel.isConnected || document.activeElement!==text || text.selectionStart!==text.selectionEnd){writingCaret.hidden=true;return;}
+        var m=caretMetrics(),x=m.rect.left+m.left+m.x-text.scrollLeft,y=m.rect.top+m.top+m.y-text.scrollTop;
+        writingCaret.hidden=x<m.rect.left || x>m.rect.left+text.clientWidth || y<m.rect.top || y+m.height>m.rect.top+text.clientHeight;
+        writingCaret.style.left=x+"px";writingCaret.style.top=y+"px";writingCaret.style.height=m.height+"px";
+      }
+      function updateWritingCaret(){if(!caretFrame)caretFrame=requestAnimationFrame(drawWritingCaret);}
+      function revealWritingCaret(){
+        var m=caretMetrics(),width=text.clientWidth-m.left-m.right,height=text.clientHeight-m.top-m.bottom;
+        if(m.y<text.scrollTop)text.scrollTop=m.y;
+        else if(m.y+m.height>text.scrollTop+height)text.scrollTop=m.y+m.height-height;
+        if(m.x<text.scrollLeft)text.scrollLeft=m.x;
+        else if(m.x>text.scrollLeft+width-8)text.scrollLeft=m.x-width+8;
+        updateWritingCaret();
+      }
+      document.addEventListener("selectionchange",updateWritingCaret);
+      window.addEventListener("resize",updateWritingCaret);
+      for(var caretEvent of ["input","keyup","scroll","focus","blur"])text.addEventListener(caretEvent,updateWritingCaret);
+      var caretResize=typeof ResizeObserver!=="undefined"?new ResizeObserver(updateWritingCaret):null;if(caretResize)caretResize.observe(text);
+      updateWritingCaret();
       var cursor = new TextDecoder().decode(new TextEncoder().encode(req.text).slice(0, req.point)).length;
-      text.focus(); text.setSelectionRange(cursor, cursor);
+      // the view shows the cursor: focusing a long text scrolls it away
+      // (to its end), so scroll back to the cursor, now and after layout
+      text.focus({ preventScroll: true }); text.setSelectionRange(cursor, cursor);
+      revealWritingCaret(); requestAnimationFrame(revealWritingCaret);
+      // A y-or-n question in the line under the status line, as Emacs asks
+      // in its minibuffer (no browser dialog)
+      function askYesNo(question, yes) {
+        if (searchBar) closeWritingSearch(true);
+        var line = document.createElement("div"); line.className = "writing-search writing-question";
+        var words = document.createElement("span"); words.className = "writing-search-label"; words.textContent = question;
+        var block = document.createElement("span"); block.className = "writing-search-cursor"; block.setAttribute("aria-hidden", "true");
+        line.setAttribute("role", "alert"); line.append(words, block); bar.after(line);
+        function answer(e) {
+          if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+          e.preventDefault(); e.stopImmediatePropagation();
+          var k = e.key.toLowerCase();
+          if (k === "y" || k === "n" || k === "escape" || (e.ctrlKey && k === "g")) {
+            firstKeys = searchShortcut; line.remove(); text.focus();
+            if (k === "y") yes();
+          }
+        }
+        firstKeys = answer;
+      }
       function finish(action, extra) {
-        if (req.persistent && action === "quit" && (req.modified || text.value !== req.text) &&
-            !window.confirm("This document has unsaved changes. Quit without saving?")) return;
+        if (action === "quit!") action = "quit";
+        else if (req.persistent && action === "quit" && (req.modified || text.value !== req.text)) {
+          askYesNo("Modified buffer; quit without saving? (y or n) ", function () { finish("quit!"); });
+          return;
+        }
         var result = action === "cancel" ? null : JSON.stringify({ text: text.value,
           point: new TextEncoder().encode(text.value.slice(0, text.selectionStart)).length,
-          save: action === "save", action: action, path: extra && extra.path,
+          save: action === "save", action: action, path: extra && extra.path, key: extra && extra.key,
           request: extra && extra.request });
-        panel.remove(); document.body.classList.remove("document-active"); keysField.focus(); resolve(result);
+        if (window.browseredFirstKeys === firstKeysOfThisView) window.browseredFirstKeys = null;
+        document.removeEventListener("selectionchange",updateWritingCaret);window.removeEventListener("resize",updateWritingCaret);
+        if(caretResize)caretResize.disconnect();if(caretFrame)cancelAnimationFrame(caretFrame);
+        document.removeEventListener("selectionchange",updateStatus);if(statusFrame)cancelAnimationFrame(statusFrame);
+        panel.remove(); document.body.classList.remove("document-active"); focusKeys(); resolve(result);
       }
       apply.addEventListener("click", function () { finish("apply"); });
       save.addEventListener("click", function () { finish("save"); });
       cancel.addEventListener("click", function () { finish("cancel"); });
       panel.addEventListener("paste", function (e) { e.stopPropagation(); });
+      var searchBar = null, searchInput = null, searchDirection = 1, searchLabel = null, searchText = null;
+      var prefixSelection = null;
+      var searchOrigin = null, searchHit = null, searchQuery = "", searchReplace = false, searchComposition = null;
+      function findWriting(repeat) {
+        var query = searchInput.value;
+        if (!query) { searchHit=null; searchStatus.textContent="";text.setSelectionRange(searchOrigin[0],searchOrigin[0]); return; }
+        var from = repeat && searchHit ? (searchDirection>0 ? searchHit[1] : searchHit[0]-1) :
+          (searchDirection>0 ? searchOrigin[0] : searchOrigin[1]-query.length);
+        var found = searchDirection>0 ? text.value.indexOf(query,from) :
+          (from<0 ? -1 : text.value.lastIndexOf(query,from));
+        searchStatus.textContent = found<0 ? "Not found" : "";
+        searchBar.classList.toggle("failing",found<0);
+        if(found>=0) {
+          searchHit=[found,found+query.length];text.setSelectionRange(found,found);
+          revealWritingCaret();
+        }
+      }
+      var searchStatus;
+      function closeWritingSearch(cancelled) {
+        if(!searchBar)return;
+        if(cancelled) text.setSelectionRange(searchOrigin[0],searchOrigin[1],searchOrigin[2]);
+        else if(searchHit) {var point=searchHit[0];text.setSelectionRange(point,point);}
+        searchQuery=searchInput.value;searchBar.remove();searchBar=null;searchInput=null;searchLabel=null;searchText=null;text.focus();
+        revealWritingCaret();
+      }
+      function searchShortcut(e) {
+        if(!panel.contains(document.activeElement) || e.isComposing)return;
+        var key=e.key.toLowerCase();
+        // C-x and its second key are taken here, by the page's first key
+        // listener.  Grammarly watches the keys before the page does, and
+        // takes Ctrl-S in a text field for its snippets: so after C-x the
+        // focus leaves the text (for the panel) until the second key.
+        if(e.ctrlKey && !e.altKey && !e.metaKey && key==="x" && !panel.dataset.prefix && !searchBar){
+          e.preventDefault();e.stopImmediatePropagation();panel.dataset.prefix="x";
+          prefixSelection=[text.selectionStart,text.selectionEnd,text.selectionDirection];
+          panel.tabIndex=-1;panel.focus({preventScroll:true});return;
+        }
+        if(panel.dataset.prefix==="x" && !["control","shift","alt","meta"].includes(key)){
+          e.preventDefault();e.stopImmediatePropagation();delete panel.dataset.prefix;
+          if(document.activeElement!==text){
+            var top=text.scrollTop,left=text.scrollLeft;text.focus({preventScroll:true});
+            if(prefixSelection)text.setSelectionRange(prefixSelection[0],prefixSelection[1],prefixSelection[2]);
+            text.scrollTop=top;text.scrollLeft=left;
+          }
+          if(e.ctrlKey && key==="s")finish("save");
+          else if(e.ctrlKey && key==="c")finish(req.persistent?"quit":"apply");
+          // C-x C-f, C-x b: the editor's own commands (prompts on its
+          // message line); prose comes back to this view
+          else if(req.persistent && e.ctrlKey && key==="f")finish("key",{key:"C-x C-f"});
+          else if(req.persistent && !e.ctrlKey && key==="b")finish("key",{key:"C-x b"});
+          else if(key==="h"){text.focus();text.select();}
+          return;
+        }
+        // M-s and M-r (Alt, or Esc then the key) search too: Grammarly
+        // takes Ctrl-S in a text field before the page can see it
+        var metaSearch=!e.ctrlKey && !e.metaKey && panel.dataset.prefix!=="x" &&
+          ((e.altKey && (e.code==="KeyS" || e.code==="KeyR")) || (escapePrefix && (key==="s" || key==="r")));
+        if(metaSearch){escapePrefix=false;key=(e.code==="KeyR" || key==="r")?"r":"s";}
+        var searchKey=metaSearch || (e.ctrlKey && !e.altKey && !e.metaKey && (key==="s" || key==="r") && panel.dataset.prefix!=="x");
+        if(searchKey) {
+          // Capture before document-level snippet/save shortcuts. Browser
+          // extension shortcuts registered outside the page remain external.
+          e.preventDefault();e.stopImmediatePropagation();
+          searchDirection=key==="s"?1:-1;
+          if(searchLabel)searchLabel.textContent=searchDirection>0?"I-search: ":"I-search backward: ";
+          if(!searchBar) {
+            searchOrigin=[text.selectionStart,text.selectionEnd,text.selectionDirection];searchHit=searchQuery?[searchOrigin[0],searchOrigin[0]+searchQuery.length]:null;searchReplace=!!searchQuery;
+            // the search line at the bottom, as Emacs's minibuffer: the query
+            // with a blinking block cursor; the text keeps the focus
+            searchBar=document.createElement("div");searchBar.className="writing-search";
+            searchLabel=document.createElement("span");searchLabel.className="writing-search-label";
+            searchText=document.createElement("span");searchText.className="writing-search-text";
+            searchText.setAttribute("role","textbox");searchText.setAttribute("aria-readonly","true");searchText.setAttribute("aria-label","Search document");
+            var block=document.createElement("span");block.className="writing-search-cursor";block.setAttribute("aria-hidden","true");
+            searchInput={get value(){return searchText.textContent;},set value(v){searchText.textContent=v;}};
+            searchInput.value=searchQuery;searchStatus=document.createElement("span");searchStatus.setAttribute("role","status");
+            var close=document.createElement("button");close.textContent="Close search";close.onclick=function(){closeWritingSearch(false);};
+            searchBar.append(searchLabel,searchText,block,searchStatus,close);bar.after(searchBar);
+            searchBar.addEventListener("mousedown",function(event){if(event.target!==close){event.preventDefault();text.focus();}});
+            searchLabel.textContent=searchDirection>0?"I-search: ":"I-search backward: ";
+            text.focus();findWriting(!!searchQuery);
+          } else {searchReplace=false;findWriting(true);}
+        } else if(searchBar && key==="backspace" && !e.ctrlKey && !e.altKey && !e.metaKey) {
+          e.preventDefault();e.stopImmediatePropagation();searchReplace=false;
+          searchInput.value=Array.from(searchInput.value).slice(0,-1).join("");searchHit=null;findWriting(false);
+        } else if(searchBar && (key==="enter" || key==="escape" || (e.ctrlKey && key==="g"))) {
+          e.preventDefault();e.stopImmediatePropagation();closeWritingSearch(e.ctrlKey && key==="g");
+        } else if(searchBar && !["Control","Alt","Shift","Meta"].includes(e.key) &&
+                   (e.ctrlKey || e.metaKey || e.altKey || /^(Arrow|Home|End|Page|Delete|Tab)/.test(e.key))) {
+          // A movement/editing command accepts the match, then runs normally.
+          closeWritingSearch(false);
+        }
+      }
+      function addSearchText(value) {
+        if(searchReplace){searchInput.value="";searchReplace=false;}
+        searchInput.value+=value;searchHit=null;findWriting(false);
+      }
+      text.addEventListener("beforeinput",function(e){
+        if(searchBar && !searchComposition && e.inputType.startsWith("insert") && e.data!==null){
+          e.preventDefault();addSearchText(e.data);
+        }
+      });
+      text.addEventListener("paste",function(e){if(searchBar){e.preventDefault();e.stopImmediatePropagation();addSearchText(e.clipboardData.getData("text/plain"));}});
+      text.addEventListener("compositionstart",function(){if(searchBar)searchComposition=text.value;});
+      text.addEventListener("compositionend",function(e){if(searchBar && searchComposition!==null){text.value=searchComposition;searchComposition=null;addSearchText(e.data||"");}});
+      // the page's first keydown listener (web/shell.html) calls firstKeys
+      var firstKeys = searchShortcut;
+      function firstKeysOfThisView(e) { if (panel.isConnected) firstKeys(e); }
+      window.browseredFirstKeys = firstKeysOfThisView;
+      // Keep this a real textarea so Grammarly and native editing/undo work.
+      var mark = null, killText = "", lastKill = false, escapePrefix = false;
+      function head() { return text.selectionDirection === "backward" ? text.selectionStart : text.selectionEnd; }
+      function move(to, extend) {
+        to = Math.max(0, Math.min(text.value.length, to));
+        var anchor = mark;
+        if (anchor === null && extend)
+          anchor = text.selectionDirection === "backward" ? text.selectionEnd : text.selectionStart;
+        if (anchor === null) text.setSelectionRange(to, to);
+        else text.setSelectionRange(Math.min(anchor, to), Math.max(anchor, to), to < anchor ? "backward" : "forward");
+        lastKill = false;revealWritingCaret();
+      }
+      function previous(pos) { return pos > 1 && /[\uDC00-\uDFFF]/.test(text.value[pos-1]) ? pos-2 : Math.max(0,pos-1); }
+      function next(pos) { return pos < text.value.length && text.value.codePointAt(pos) > 65535 ? pos+2 : Math.min(text.value.length,pos+1); }
+      function pagePosition(pos,direction){
+        var lines=text.value.split("\n"),prefix=text.value.slice(0,pos).split("\n"),row=prefix.length-1,column=prefix[prefix.length-1].length;
+        var style=getComputedStyle(text),count=Math.max(1,Math.floor((text.clientHeight-parseFloat(style.paddingTop)-parseFloat(style.paddingBottom))/parseFloat(style.lineHeight))-2);
+        var target=Math.max(0,Math.min(lines.length-1,row+direction*count)),offset=0;
+        for(var i=0;i<target;i++)offset+=lines[i].length+1;
+        return offset+Math.min(column,lines[target].length);
+      }
+      function word(pos, direction) {
+        var v=text.value, isWord=c=>/[\p{L}\p{N}_]/u.test(c || "");
+        if (direction > 0) {
+          while(pos<v.length && !isWord(String.fromCodePoint(v.codePointAt(pos)))) pos=next(pos);
+          while(pos<v.length && isWord(String.fromCodePoint(v.codePointAt(pos)))) pos=next(pos);
+        } else {
+          while(pos>0 && !isWord(v.slice(previous(pos),pos))) pos=previous(pos);
+          while(pos>0 && isWord(v.slice(previous(pos),pos))) pos=previous(pos);
+        }
+        return pos;
+      }
+      function edit(start,end,replacement) {
+        text.setSelectionRange(start,end); mark=null;
+        // insertText participates in the browser undo history and emits input.
+        if (!document.execCommand("insertText",false,replacement)) {
+          text.setRangeText(replacement,start,end,"end");
+          text.dispatchEvent(new Event("input",{bubbles:true}));
+        }
+      }
+      text.addEventListener("input",function(){mark=null;lastKill=false;});
+      text.addEventListener("mousedown",function(){mark=null;escapePrefix=false;});
+      text.addEventListener("keydown",function(e){
+        if(["Control","Shift","Alt","Meta"].includes(e.key)) return;
+        if(e.isComposing || e.key === "Dead" || e.key === "Process") return;
+        if(e.key === "Escape") {e.preventDefault();escapePrefix=true;return;}
+        var meta=(e.altKey && !(e.getModifierState && e.getModifierState("AltGraph"))) || escapePrefix;
+        escapePrefix=false;
+        var key=baseKey(e),pos=head(),v=text.value;
+        var start=pos===0?0:v.lastIndexOf("\n",pos-1)+1,end=v.indexOf("\n",pos);if(end<0)end=v.length;
+        var to=null,range=null;
+        if(e.ctrlKey && !e.altKey && !e.metaKey && (e.key==="Home" || e.key==="End")){
+          e.preventDefault();move(e.key==="Home"?0:v.length,e.shiftKey);return;
+        }
+        if(e.ctrlKey && !e.altKey && !e.metaKey) {
+          switch(key){
+          case "v": to=pagePosition(pos,1);break;
+          case "a": to=start;break;
+          case "e": to=end;break;
+          case "b": to=previous(pos);break;
+          case "f": to=next(pos);break;
+          case "p": {var up=Math.max(0,start-1),upStart=v.lastIndexOf("\n",up-1)+1;to=start===0?0:Math.min(upStart+pos-start,up);break;}
+          case "n": {var down=Math.min(v.length,end+1),downEnd=v.indexOf("\n",down);to=Math.min(down+pos-start,downEnd<0?v.length:downEnd);break;}
+          case " ": case "2": e.preventDefault();mark=pos;lastKill=false;return;
+          case "g": e.preventDefault();mark=null;text.setSelectionRange(pos,pos);lastKill=false;delete panel.dataset.prefix;return;
+          case "k": range=[pos,end===pos?Math.min(v.length,pos+1):end];break;
+          case "w": range=[text.selectionStart,text.selectionEnd];break;
+          case "y": e.preventDefault();edit(text.selectionStart,text.selectionEnd,killText);return;
+          case "d": e.preventDefault();edit(text.selectionStart,text.selectionEnd===text.selectionStart?next(pos):text.selectionEnd,"");return;
+          case "h": e.preventDefault();edit(text.selectionStart===text.selectionEnd?previous(pos):text.selectionStart,text.selectionEnd,"");return;
+          case "-": if (!e.shiftKey) break; // C-_ on the physical minus key
+          case "/": case "_": e.preventDefault();mark=null;document.execCommand("undo");return;
+          }
+        } else if(meta && !e.ctrlKey && !e.metaKey) {
+          if(key==="v")to=pagePosition(pos,-1);
+          else if(key==="b")to=word(pos,-1);
+          else if(key==="f")to=word(pos,1);
+          else if(key==="d")range=[pos,word(pos,1)];
+          else if(e.key==="Backspace")range=[word(pos,-1),pos];
+          else if(key==="w"){e.preventDefault();if(text.selectionStart!==text.selectionEnd)killText=v.slice(text.selectionStart,text.selectionEnd);mark=null;text.setSelectionRange(pos,pos);lastKill=false;return;}
+          else if(e.key==="<" || (e.shiftKey && key===","))to=0;
+          else if(e.key===">" || (e.shiftKey && key==="."))to=v.length;
+        } else if(e.key==="Tab" && !e.ctrlKey && !e.metaKey){e.preventDefault();edit(text.selectionStart,text.selectionEnd,"\t");return;}
+        if(to!==null){e.preventDefault();var selecting=e.shiftKey && !(meta && (key==="," || key==="." || e.key==="<" || e.key===">"));move(to,selecting);return;}
+        if(range){e.preventDefault();if(range[0]===range[1])return;var killed=v.slice(range[0],range[1]),join=lastKill,backwards=range[0]<pos;edit(range[0],range[1],"");killText=join?(backwards?killed+killText:killText+killed):killed;lastKill=true;return;}
+        if(!e.ctrlKey && !e.metaKey && !meta)lastKill=false;
+      });
       panel.addEventListener("keydown", function (e) {
         e.stopPropagation();
+        if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
         var key = e.key.toLowerCase();
         if ((isMac ? e.metaKey : e.ctrlKey) && key === "s") {
           e.preventDefault(); finish("save"); return;
         }
-        if (req.persistent && e.ctrlKey && key === "x") {
-          e.preventDefault(); panel.dataset.prefix = "x";
-        } else if (req.persistent && panel.dataset.prefix === "x") {
+        if (e.ctrlKey && !e.altKey && !e.metaKey && key === "c" && !panel.dataset.prefix) {
+          panel.dataset.prefix = "c";   // not prevented: Ctrl-C still copies on Windows and Linux
+        } else if (panel.dataset.prefix === "c") {
           delete panel.dataset.prefix;
-          if (e.ctrlKey && key === "c") { e.preventDefault(); finish("quit"); }
+          // C-c d: the same buffer in the advanced (canvas) editor
+          if (key === "d" && !e.ctrlKey && !e.altKey && !e.metaKey) { e.preventDefault(); finish(req.persistent ? "advanced" : "apply"); }
+        } else if (e.ctrlKey && key === "x") {
+          e.preventDefault(); panel.dataset.prefix = "x";
+        } else if (panel.dataset.prefix === "x") {
+          delete panel.dataset.prefix;
+          if (e.ctrlKey && key === "c") { e.preventDefault(); finish(req.persistent ? "quit" : "apply"); }
           else if (e.ctrlKey && key === "s") { e.preventDefault(); finish("save"); }
+          else if (key === "h") { e.preventDefault(); text.focus(); text.select(); }
         }
       });
     });
@@ -1346,6 +1856,14 @@ Module.browsered = (function () {
 
   var calls = {
     "writing-mode": writingMode,
+    "schemer-prepare-file": async function(path){
+      if(path.indexOf("~/")===0)path=HOME+path.slice(1);
+      if(path.charAt(0)!=="/")path=PATH.join2(FS.cwd(),path);
+      var parent=path.slice(0,path.lastIndexOf("/"))||"/";
+      await ensure(parent+"/",false);return path;
+    },
+    "schemer-supported": function(){return typeof WebAssembly.Suspending==="function"&&typeof WebAssembly.promising==="function"?"jspi":"compatibility";},
+    "schemer-status": function(){return window.BrowseredSchemer?BrowseredSchemer.status():"{}";},
     "command-complete": commandCompletions,
     "command-context": function (directory) {
       if (!commandDirectoryExplicit) {
@@ -1382,6 +1900,8 @@ Module.browsered = (function () {
       } catch (e) { return JSON.stringify(["", "Local shell unavailable: " + e.message, 127]); }
     },
     "codex-ask": function (json) { return codexAsk(JSON.parse(json), []); },
+    "claude-ask": function (json) { return claudeAsk(JSON.parse(json)); },
+    "claude-bridge": function () { return claudeBridge(); },
     "api-key": apiKeyPrompt,
     "irene-dixe": function (json) { return ireneDixe(json); },
     "pdf-render": function (json) {
@@ -1419,6 +1939,25 @@ Module.browsered = (function () {
     },
     "folder-access": function () { return window.showDirectoryPicker || localFilesAvailable() ? "yes" : null; },
     "user-agent": function () { return navigator.userAgent; },
+    // ?advanced in the address: prose files too stay in the advanced editor
+    "auto-document": function () { return new URLSearchParams(location.search).has("advanced") ? null : "yes"; },
+    // M-x grammarly-status: what Grammarly did with the page and the field
+    "grammarly-status": function () {
+      function marks(el) {
+        if (!el) return "";
+        return Array.prototype.filter.call(el.attributes, function (a) { return /gr|gramm/i.test(a.name); })
+          .map(function (a) { return a.name; }).join(" ");
+      }
+      var page = marks(document.body) + " " + marks(document.documentElement);
+      var shadow = document.querySelectorAll("grammarly-extension, grammarly-desktop-integration, grammarly-popups").length;
+      return "Grammarly in the page: " + (page.trim() || shadow ? "yes (" + (page.trim() || shadow + " elements") + ")" : "no") +
+        ";  field: " + (layer ? (marks(layer) || "not taken by Grammarly") : "none ([GRAMMAR] first)");
+    },
+    "grammarly-show-field": function () {
+      if (!layer) return null;
+      layer.classList.toggle("shown");
+      return layer.classList.contains("shown") ? "shown" : "hidden";
+    },
     "test-result": function (text) { Module.browsered._test = text; return "ok"; },
     "mkdirs": function (path) { mkdirs(path); return "ok"; },
     // the assistants' APIs: {url, headers, body} -> {status, text}
@@ -1462,10 +2001,27 @@ Module.browsered = (function () {
     n.hidden = false;
   }
 
+  // Injected extensions can throw on this window even while editing works.
+  // Attribute by source, never by message: the same error in our own code
+  // must remain visible. Leave extension diagnostics in the browser console.
+  function extensionFailure(filename, error) {
+    var extensionURL = /\b(?:chrome-extension|moz-extension|safari-extension|safari-web-extension|ms-browser-extension):\/\//i;
+    if (filename) return extensionURL.test(filename);
+    var stack = error && error.stack;
+    if (typeof stack !== "string") return false;
+    var frame = stack.split("\n").find(function (line) {
+      return /^\s*at\s/.test(line) || /@[a-z][a-z0-9+.-]*:\/\//i.test(line);
+    });
+    return !!frame && extensionURL.test(frame);
+  }
+
   function start() {
-    window.addEventListener("error", function (e) { showFailure(e.message); });
+    window.addEventListener("error", function (e) {
+      if (!extensionFailure(e.filename, e.error)) showFailure(e.message);
+    });
     window.addEventListener("unhandledrejection", function (e) {
-      showFailure(String(e.reason && e.reason.message || e.reason));
+      if (!extensionFailure(null, e.reason))
+        showFailure(String(e.reason && e.reason.message || e.reason));
     });
     canvas = document.getElementById("screen");
     ctx = canvas.getContext("2d", { alpha: false });
@@ -1476,8 +2032,7 @@ Module.browsered = (function () {
     keysField.addEventListener("input", function (e) { if (!e.isComposing) takeTyped(); });
     keysField.addEventListener("compositionend", takeTyped);
     keysField.focus();
-    var writingButton = document.getElementById("writing-toggle");
-    writingButton.addEventListener("click", function () { runScheme("(document-editor)"); });
+    // no button for the writing view: C-c d, or C-x C-f of a prose file (web.scm)
     document.addEventListener("keydown", keydown);
     document.addEventListener("paste", function (e) {
       e.preventDefault();
@@ -1486,13 +2041,13 @@ Module.browsered = (function () {
     window.addEventListener("resize", resized);
     window.addEventListener("focus", function () {
       if (finished || document.querySelector(".api-key-dialog, #writing-mode")) return;
-      focused = true; keysField.focus(); push(0x0C);
+      focused = true; focusKeys(); push(0x0C);
       refreshFiles();
     });
     window.addEventListener("blur", function () { focused = false; last = null; push(0x0C); });
     canvas.addEventListener("mousedown", function (e) {
       e.preventDefault();
-      keysField.focus();
+      focusKeys();
       if (e.button === 0) { buttonDown = true; mouse(0, e, false); e.preventDefault(); }
     });
     window.addEventListener("mousemove", function (e) { if (buttonDown) mouse(32, e, false); });
@@ -1516,8 +2071,8 @@ Module.browsered = (function () {
       finished = true;
       queue = []; evals = [];
       canvas.hidden = true; canvas.style.display = "none";
-      document.getElementById("writing-toggle").hidden = true;
       keysField.blur(); keysField.disabled = true;
+      removeLayer();
       document.getElementById("notice").hidden = true;
       var closed = document.createElement("section");
       closed.id = "editor-closed";
@@ -1528,11 +2083,34 @@ Module.browsered = (function () {
       restart.addEventListener("click", function () { location.reload(); });
       closed.append(title, text, restart); document.body.append(closed);
       restart.focus();
+      // Started by Browsered.command: its launcher stops too (and closes
+      // its Terminal window); the next start is Browsered.command again.
+      // A beacon goes even if the tab closes at once; the fetch, if the tab
+      // stays, gives the answer to show.
+      if (localBridge()) {
+        try { navigator.sendBeacon("/quit", "quit"); } catch (e) { /* the fetch below */ }
+        fetch("/quit", { method: "POST", keepalive: true, body: "quit" })
+          .then(function (r) { return r.text(); })
+          .then(function (t) {
+            if (t.indexOf("Browsered launcher stopped") !== 0) return;   // not the launcher
+            text.textContent = "Browsered.command has stopped too. Double-click it to start Browsered again; " +
+                               "you can close this tab with Cmd-W (Mac) or Ctrl-W.";
+            restart.hidden = true;
+          }).catch(function () {   // the beacon stopped it first
+            text.textContent = "Browsered.command has stopped too. Double-click it to start Browsered again.";
+            restart.hidden = true;
+          });
+      }
       try { window.close(); } catch (e) { /* not allowed */ }
     },
     call: call,
     restoreFolders: restoreFolders,
-    takeEval: function () { return evals.length ? evals.shift() : null; },
+    takeEval: function () {
+      var e = evals.length ? evals.shift() : null;
+      if (e && e.indexOf("(web-layer-edit ") === 0) layerTaken++;
+      return e;
+    },
+    textLayer: textLayer,
     home: function () { return HOME; },
     rows: function () { return nRows; },
     cols: function () { return nCols; },

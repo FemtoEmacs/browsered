@@ -32,6 +32,7 @@ extern void fe_set_modeline_hints(char *help, char *tail);
 extern void editor_mouse_event(void);
 extern int fe_buffer_read_only(void);
 extern void fe_set_read_only(int on);
+extern int getcommand(char *, int);
 
 static value_t bytes_string(const char *data, size_t len)
 {
@@ -127,11 +128,26 @@ static value_t real_path(value_t *a, uint32_t n)
 static value_t format_time(value_t *a, uint32_t n)
 {
 	argcount("format-time", n, 1);
-	time_t t = (time_t) tofixnum(a[0], "format-time");
+	/* Browser Wasm uses 29-bit fixnums; ordinary Unix timestamps are
+	 * boxed int32/int64 values returned by file-attributes. */
+	int64_t seconds;
+	if (isfixnum(a[0])) seconds = (int64_t) numval(a[0]);
+	else if (iscprim(a[0]) && cp_numtype((cprim_t *)ptr(a[0])) < T_FLOAT) {
+		cprim_t *number = (cprim_t *)ptr(a[0]);
+		if (cp_numtype(number) == T_UINT64 &&
+		    conv_to_uint64(cp_data(number), T_UINT64) > INT64_MAX)
+			lerror(ArgError, "format-time: timestamp out of range");
+		seconds = conv_to_int64(cp_data(number), cp_numtype(number));
+	} else {
+		type_error("format-time", "integer", a[0]);
+		return FL_F;
+	}
+	time_t t = (time_t) seconds;
+	if ((int64_t)t != seconds) lerror(ArgError, "format-time: timestamp out of range");
 	struct tm tm;
 	char out[32];
-	localtime_r(&t, &tm);
-	strftime(out, sizeof(out), "%Y-%m-%d %H:%M", &tm);
+	if (!localtime_r(&t, &tm) || !strftime(out, sizeof(out), "%Y-%m-%d %H:%M", &tm))
+		lerror(ArgError, "format-time: timestamp out of range");
 	return bytes_string(out, strlen(out));
 }
 
@@ -353,10 +369,19 @@ static value_t get_pid(value_t *a, uint32_t n)
 	return fixnum((fixnum_t) getpid());
 }
 
+static value_t command_prompt(value_t *a, uint32_t n)
+{
+    (void)a; argcount("command-prompt", n, 0);
+    char command[4096] = "";
+    if (!getcommand(command, sizeof(command))) return FL_F;
+    return bytes_string(command, strlen(command));
+}
+
 void primitives_init(void)
 {
 	static builtinspec_t functions[] = {
 		{ "buffer-substring", buffer_substring },
+        { "command-prompt", command_prompt },
 		{ "fe-insert-bytes", insert_bytes },
 		{ "fe-add-command-name", add_command_name },
 		{ "fe-set-buffer-hint", set_buffer_hint },

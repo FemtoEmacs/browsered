@@ -34,9 +34,23 @@ request=$(cat)
 if [ "$request" = FAIL ]; then echo 'fake CLI failure' >&2; exit 7; fi
 printf 'Codex allowance reply: %s; images=%s' "$request" "$images" > "$out"
 `, {mode: 0o700});
+// a fake claude (Claude Code): no API credentials, no tools, the question
+// as the last argument, the context on standard input
+const fakeClaude = path.join(temp, 'fake-claude');
+fs.writeFileSync(fakeClaude, `#!/bin/sh
+if [ -n "\${ANTHROPIC_API_KEY:-}\${ANTHROPIC_AUTH_TOKEN:-}\${ANTHROPIC_BASE_URL:-}" ]; then
+  echo 'API credentials were inherited' >&2; exit 9
+fi
+test "$1" = -p && test "$2" = --tools && test "$3" = "" || { echo "bad arguments: $*" >&2; exit 8; }
+for last do :; done
+context=$(cat)
+if [ "$last" = FAIL ]; then echo 'Not logged in: run /login' >&2; exit 1; fi
+printf 'Claude subscription reply to [%s] about [%s]' "$last" "$context"
+`, {mode: 0o700});
 const child = spawn(path.join(root, 'build/browsered-codex-bridge'),
   ['--serve', '--port', '0', '--page', path.join(root, 'Browsered.html')], {
-    env: {...process.env, BROWSERED_CODEX: fake, BROWSERED_TEST_LOG: log,
+    env: {...process.env, BROWSERED_CODEX: fake, BROWSERED_CLAUDE: fakeClaude, BROWSERED_TEST_LOG: log,
+      ANTHROPIC_API_KEY: 'dummy-key-that-must-not-be-used',
       BROWSERED_TEST_API_AUTH: path.join(temp, 'api-auth'),
       OPENAI_API_KEY: 'dummy-key-that-must-not-be-used', CODEX_API_KEY: 'dummy', OPENAI_BASE_URL: 'https://invalid.example'}
   });
@@ -82,6 +96,28 @@ const started = new Promise((resolve, reject) => {
     assert.equal(r.status, 502); assert.match(r.text, /not signed in with ChatGPT/);
     assert.equal(fs.readFileSync(log, 'utf8'), before, 'API-key login must not run inference');
     before.trim().split('\n').forEach(dir => assert.equal(fs.existsSync(dir), false, 'Private workspace must be removed'));
+    // Claude Code
+    assert.equal((await request('GET', '/claude/status')).text, 'Browsered Claude bridge: ' + fakeClaude);
+    const claudeBody = (sys, q, ctx) => '\n' + Buffer.byteLength(sys) + '\n' + Buffer.byteLength(q) + '\n' + sys + q + ctx;
+    const claudeType = {'Content-Type': 'application/x-browsered-claude'};
+    assert.equal((await request('POST', '/claude', claudeBody('S', 'Q', 'C'))).status, 403, 'the Codex type is refused');
+    assert.equal((await request('POST', '/claude', claudeBody('S', 'Q', 'C'), {...claudeType, Origin: 'https://evil.example'})).status, 403);
+    assert.equal((await request('POST', '/claude', '\n99\n1\nab', claudeType)).status, 400);
+    r = await request('POST', '/claude', claudeBody('Be brief.', 'What is ação?', '(define x 1)\n<<CURSOR>>'), claudeType);
+    assert.equal(r.status, 200, r.text);
+    assert.equal(r.text, 'Claude subscription reply to [What is ação?] about [(define x 1)\n<<CURSOR>>]');
+    r = await request('POST', '/claude', claudeBody('S', 'FAIL', ''), claudeType);
+    assert.equal(r.status, 502); assert.match(r.text, /Not logged in/);
+    console.log('all Claude bridge tests passed (subscription only, origin checks)');
+    // C-x C-c: only the page's own origin and type stop the launcher
+    assert.equal((await request('POST', '/quit', 'quit', {'Content-Type': 'application/x-browsered-quit', Origin: 'https://evil.example'})).status, 403);
+    assert.equal((await request('POST', '/quit', 'quit', {Origin: ''})).status, 403, 'no origin, not same-origin');
+    assert.equal((await request('POST', '/quit', 'quit', {Origin: '', 'Sec-Fetch-Site': 'cross-site'})).status, 403);
+    const exited = new Promise(ok => child.on('exit', ok));
+    r = await request('POST', '/quit', 'quit', {'Content-Type': 'text/plain;charset=UTF-8'});
+    assert.equal(r.status, 200); assert.match(r.text, /^Browsered launcher stopped/);
+    await Promise.race([exited, new Promise((_, no) => setTimeout(() => no(new Error('the launcher did not stop')), 5000))]);
+    console.log('the launcher stops on C-x C-c');
     console.log('all Codex bridge tests passed (text, images, auth, origin/host checks, cleanup; no paid API calls)');
   } finally { child.kill(); fs.rmSync(temp, {recursive: true, force: true}); }
 })().catch(e => { console.error(e); process.exitCode = 1; });

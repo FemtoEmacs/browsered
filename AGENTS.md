@@ -14,21 +14,42 @@ Schememax's. What is Browsered's own:
 | `src/web.c` | the screen layer (screen.h) for the page: a grid of cells handed to the page; `screen_getch` waits for the page through Asyncify; a key value of -2 means "the page has Scheme to run" (`web_take_eval`) |
 | `src/web-main.c` | `main(void)`: passes the page's arguments to app.c's main (compiled as `app_main`), calls `web_ended` after C-x C-c; a `posix_spawnp` that fails (no processes in a page) |
 | `src/web-scheme.c` | `(web-call NAME ARG)`: Scheme calls `Module.browsered.call(NAME, ARG)` in the page and waits for its string (or #f) |
+| `src/web-fast.c` | `latex-highlight` and `markdown-wrap-end` in C, byte for byte (web.scm puts them in place in the browser; `tests/fast-test.js` compares them with the Scheme) |
+| `src/web-layer.c` | for [GRAMMAR]: the selected window's rows and text, sent to the page after each redisplay |
 | `web/shell.html` | the page: the canvas, the hidden `#keys` text field, the `#notice` banner |
 | `web/browsered.js` | the page's side: painting, keys, mouse, clipboard, HOME in IndexedDB, folders of the computer, the APIs, banners, `?reset` |
 | `scheme/extensions/web.scm` | Browsered's commands and overrides; harmless in Schememax (it checks `(in-browser?)`) |
 | `src/web-sdl.c`, `web/sdl/`, `web/irene-dixe-pre.js` | irene-dixe (Schememax's, unchanged) on a canvas; a module of its own, `build/irene-dixe.js` |
 | `web/vendor/` | pdf.js, for TTFY |
 | `tests/web-test.js` | `make check-web` |
-| `tools/` | `make sync`, Schememax's versions of the files changed here, and the optional C Codex bridge |
-| `Browsered.command` | macOS/Linux launcher for the user's signed-in Codex allowance; serves the same HTML on loopback |
+| `tools/` | `make sync`, Schememax's versions of the files changed here, and the optional C bridge (`codex-bridge.c`: `/codex`, `/claude`, `/shell`, `/files`) |
+| `Browsered.command` | macOS/Linux launcher for the user's signed-in Codex allowance and Claude subscription (Claude Code); serves the same HTML on loopback |
 
 ## The rules
 
-- **Start in the advanced canvas editor, as requested by the user.**
-  Writing / Grammarly opens a visible textarea for the current buffer;
-  browser writing tools cannot check text painted on the canvas. Keep
-  that optional interface in web.scm and browsered.js.
+- **One editor: the canvas, as requested by the user.** Every file, prose
+  included, opens in Schememax's canvas editor, with all its keys, windows
+  and the menu.scm mode line. Grammarly reads only text fields, so
+  [GRAMMAR] / `C-c d` (`toggle-grammarly`, web.scm) lays a transparent
+  textarea with the selected window's text exactly over its rows
+  (`src/web-layer.c` describes the window after each redisplay; `textLayer`
+  in browsered.js is the field). Only on request: never while the user
+  simply writes (Grammarly would nag), and it ends with [GRAMMAR] again or
+  when the window shows another buffer. Only word-wrapped prose, never code.
+  The field takes the keys but never edits the buffer: typed text (and
+  text inserted at the cursor) goes to the editor; any other change of the
+  field is Grammarly's and becomes `(web-layer-edit ...)`, applied only if
+  the buffer still holds the old text, as one undoable change. The field's
+  rows must break where the editor's do (pre-wrap, letter-spacing to the
+  canvas cell width). Hide its letters with `-webkit-text-fill-color`,
+  never `color: transparent` or `autocomplete=off`, and never give it a
+  `data-gramm` attribute: any value, even "true", turns Grammarly off for
+  the field. Grammarly takes a field by setting spellcheck="false" on it. `tests/text-layer-test.js` checks that, typing,
+  corrections, Unicode, composition, C-x 2 and the on/off rules.
+  The user finds page JavaScript frail: keep it to the field; logic goes
+  in Scheme or C; never open a view on an error (an error removes the
+  field). Do not re-create a second editor in JavaScript; the old writing
+  view survives only as `M-x document-editor`.
   Never write a document to disk merely because it was typed or corrected;
   saving still requires the user's explicit Save action.
 
@@ -51,6 +72,10 @@ Schememax's. What is Browsered's own:
   Haskell, Quicklisp, Roswell, ASDF, C++, Flatpak or Snap.
 - **After every change:** `make`, `make check`, `make check-web`, all
   passing, and the rebuilt `Browsered.html` kept with the sources.
+  Claude, at the user's request, also goes through the bridge with the
+  subscription (`/claude` runs `claude -p` with no tools, as Schememax's
+  claude-cli-ask; Anthropic API variables are removed from its
+  environment); the API key is only the fallback without the launcher.
   Run `make check-codex-bridge` after bridge changes; it uses a fake CLI,
   never real credentials or paid API calls. Node remains development-only.
 - **Backups** of edited files go in a `bkp/` folder beside the file
@@ -58,6 +83,20 @@ Schememax's. What is Browsered's own:
 - **In Lisp**, do not muffle warnings; use `declaim` declarations.
 
 ## How things work, and what has bitten before
+
+- **Speed.** femtoscheme under Asyncify is several times slower than in
+  Schememax. Anything that runs at every key over the visible text must
+  not be interpreted: LaTeX colours took 127 ms a key, now 4 ms with
+  `src/web-fast.c`. The Scheme in tex.scm and markdown.scm stays the
+  reference: change it there first, then the C, and keep
+  `tests/fast-test.js` (colours and rows compared on the manual cut at
+  hundreds of places) passing. `M-x scheme-highlighting` switches back to
+  the Scheme for checking. Measure before optimizing: time from a typed
+  character to the next paint, in a large file, mid-file.
+- **The `M-:`/`:` evaluator goes through Schemer**: some forms fail there
+  ("car: expected cons" for named `let`, internal `define` in `begin`,
+  procedure values passed to editor procedures). Tests that need such
+  Scheme write it to a file and `(load ...)` it.
 
 - **Folders are writable by default, as requested by the user.** Explicit
   `M-x forbid-saving` enables protection for debugging; `M-x allow-saving`
@@ -165,3 +204,44 @@ reported through the helper response header. C-c C-f aliases C-x C-f.
 Do not reset an explicit cd just because the original file is elsewhere.
 Test completion/cancellation and opening a relative filename after cd on
 both hosted and local pages, including native paths outside browser HOME.
+
+## Schemer integration
+
+The user authorized replacing the bundled femtoscheme with Schemer's copy,
+while retaining a local backup, and integrating the Chez-inspired compiler.
+`schemer/` vendors its compiler, expander, linker, prelude and JavaScript host.
+`web/schemer.js` instantiates the self-hosted WasmGC compiler seed directly.
+The compiler seed is embedded into the single HTML; do not fetch it at runtime.
+Do not restore the retired second FemtoScheme compiler VM. The editor core
+still uses FemtoScheme until its values, macros and native callbacks are ported.
+`src/web-scheme.c` services compiled editor RPC on the editor's own stack.
+Never re-enter the suspended core from JavaScript. Prompts use JSPI, with
+legacy execution when it is unavailable. `web.scm` preflights incompatible
+legacy constructs before execution; never retry an operation in the legacy
+runtime after a compiled runtime failure, since it may already have edited
+text or saved a file. Keep native multiple-value calls and opaque mutable
+objects on the compatibility path until their bridge is implemented.
+`tests/schemer-test.js` must exercise actual compiled recursion, retained
+procedures, editor mutation, asynchronous prompts, file ports and an actual
+key-bound command. Preserve the ordinary editor regression suites too.
+
+Assistant entry commands (ask-claude, ask-codex) stay on the native
+compatibility path: their modal workflows use native callbacks and opaque
+return values that the command dispatcher ignores. Test real C-c r/C-c g
+menus (Hints, Question, Discussion), including READ-mode sources, with mock
+providers in tests/assistant-commands-test.js; direct provider-call tests do
+not cover menu dispatch. Compiled error reporting must tolerate non-Error
+rejections and never display [object Object] in place of a diagnostic.
+
+The Help-menu wrappers menu-chatgpt/menu-claude pass procedure values to
+call-in-window-of. Classify that higher-order native operation as legacy in
+both command compilation and expression evaluation. Testing only C-c g/r
+missed this path: tests must select ChatGPT and Claude from help-menu too,
+with multiple buffers open. Native procedure values are not readable Scheme
+data and must never be sent through the compiled text RPC protocol.
+
+Save As uses getfilename_default for editable current filenames and real
+filename completion; never route it back through generic getinput. Browsered
+must wrap getfilename_default as well as getfilename so unnamed buffers use
+the remembered browser folder. Test existing and unnamed buffers, directory
+and filename TAB completion, Unicode and cancellation without disk writes.

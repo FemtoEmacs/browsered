@@ -71,7 +71,7 @@ const fs=require('fs'),http=require('http'),path=require('path'),assert=require(
   await keys('Control+c','m');await page.keyboard.type('cd "space');await keys('Tab','Control+g');
   assert.equal((await command('pwd'))[0],'~/granted\n','Cancel must not run a completed command');
   await scheme('(find-file "/home/web_user/hosted.txt")');
-  await page.getByRole('button',{name:'Writing / Grammarly',exact:true}).click();
+  await page.keyboard.press('Escape');await page.keyboard.press('x');await page.keyboard.insertText('document-editor');await page.keyboard.press('Enter');   // M-x document-editor: the old writing view (C-c d is the Grammarly pane)
   await page.waitForSelector('#editor');assert.equal(await page.locator('#editor').inputValue(),'Hosted café draft.');
   await page.getByRole('button',{name:'ChatGPT',exact:true}).click();
   await page.getByLabel('ChatGPT request').fill('Explain this sentence.');

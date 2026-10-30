@@ -15,7 +15,7 @@ const assert = require('assert/strict'), path = require('path'), os = require('o
  assert.equal((await request('5\n/no-such-browsered-directory\npwd')).status,400);
  res = await request('1\n'+os.tmpdir()+'\nsleep 5'); assert.equal(await res.text(),'-1\n');
  browser = await chromium.launch(process.env.BROWSERED_TEST_CHANNEL ? {channel:process.env.BROWSERED_TEST_CHANNEL} : {});
- const page = await browser.newPage();await page.goto(base);await page.waitForTimeout(1800);
+ const page = await browser.newPage();await page.goto(base+'/?advanced');await page.waitForTimeout(1800);
  const keys = async (...ks) => {for(const k of ks) await page.keyboard.press(k);};
  const scheme = async expr => {await page.evaluate(()=>Module.browsered._test=null);await keys('Escape',':');await page.keyboard.type('(web-request "test-result" (with-output-to-string (lambda () (write '+expr+'))))');await keys('Enter');await page.waitForFunction(()=>Module.browsered._test!==null);return page.evaluate(()=>Module.browsered._test);};
  // First prompt starts at ~/; Backspace edits the prefilled text.

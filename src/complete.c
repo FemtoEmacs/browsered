@@ -16,6 +16,7 @@
  * TAB looks again, inside it.
  */
 
+static const char *completion_event = "complete-file";
 static char *completions = NULL;     /* names separated by '\n', or NULL */
 
 void fe_set_completions(char *names)
@@ -97,7 +98,7 @@ static int complete_name(char *buf, int nbuf, int len, int again)
 		buf[len] = '\0';
 		free(completions);
 		completions = NULL;
-		(void) call_lisp_event("complete-file", buf);
+		(void) call_lisp_event((char *)completion_event, buf);
 		count = completion_count();
 		if (count == 0)
 			return len;             /* nothing matches */
@@ -119,9 +120,8 @@ static int complete_name(char *buf, int nbuf, int len, int again)
 	return set_text(buf, nbuf, name, name_len);
 }
 
-int getfilename(char *prompt, char *buf, int nbuf)
+static int complete_filename(char *prompt, char *buf, int nbuf, int flag)
 {
-	int flag = F_CLEAR;
 
 	for (;;) {
 		if (!line_edit(prompt, buf, nbuf, flag, complete_name))
@@ -138,4 +138,43 @@ int getfilename(char *prompt, char *buf, int nbuf)
 		}
 		return TRUE;
 	}
+}
+
+int getfilename(char *prompt, char *buf, int nbuf)
+{
+    return complete_filename(prompt, buf, nbuf, F_CLEAR);
+}
+
+/* Save As keeps an existing filename editable, with the same completion and
+ * path expansion as Open. Unnamed buffers use the usual starting folder. */
+int getfilename_default(char *prompt, char *buf, int nbuf)
+{
+    char full[PATH_MAX], cwd[PATH_MAX];
+    const char *home=getenv("HOME"), *path;
+    int n;
+    if (!buf[0]) return getfilename(prompt,buf,nbuf);
+    if (buf[0]=='/' || (buf[0]=='~' && buf[1]=='/'))
+        n=snprintf(full,sizeof full,"%s",buf);
+    else {
+        if (!getcwd(cwd,sizeof cwd)) { msg("Cannot determine the current folder"); return FALSE; }
+        n=snprintf(full,sizeof full,"%s/%s",cwd,buf);
+    }
+    if (n<0 || (size_t)n>=sizeof full) { msg("Filename is too long"); return FALSE; }
+    path=full;
+    int tilde=home && *home && strcmp(home,"/") &&
+        !strncmp(full,home,strlen(home)) && full[strlen(home)]=='/';
+    if (tilde) path=full+strlen(home);
+    if (strlen(path)+(tilde?1:0)>=(size_t)nbuf) { msg("Filename is too long"); return FALSE; }
+    if (tilde) { buf[0]='~'; memcpy(buf+1,path,strlen(path)+1); }
+    else memcpy(buf,path,strlen(path)+1);
+    return complete_filename(prompt,buf,nbuf,F_NONE);
+}
+
+/* Shell text is completed without filename expansion or execution. */
+int getcommand(char *buf, int nbuf)
+{
+    completion_event = "complete-command";
+    int accepted = line_edit("Command: ", buf, nbuf, F_CLEAR, complete_name);
+    completion_event = "complete-file";
+    return accepted;
 }

@@ -470,7 +470,7 @@ char *rename_current_buffer(char *bname)
 void writefile()
 {
 	safe_strncpy(response_buf, curbp->b_fname, NAME_MAX);
-	if (getinput(str_write, (char*)response_buf, NAME_MAX, F_NONE)) {
+	if (getfilename_default(str_write, (char*)response_buf, NAME_MAX)) {
 		if (save_buffer(curbp, response_buf) == TRUE) {
 			safe_strncpy(curbp->b_fname, response_buf, NAME_MAX);
 			// FIXME - what if name already exists, in editor

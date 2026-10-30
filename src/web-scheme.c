@@ -131,14 +131,81 @@ static value_t web_command_prompt(value_t *a, uint32_t n)
     if (!accepted) return FL_F;
     return string_from_cstr(text);
 }
+EM_ASYNC_JS(char *, compiled_begin, (const char *request), {
+    var result;
+    try {result=await BrowseredSchemer.begin(UTF8ToString(request));}
+    catch(e) {result="error "+(e.message||String(e));}
+    var p=_malloc(lengthBytesUTF8(result)+1);stringToUTF8(result,p,lengthBytesUTF8(result)+1);return p;
+});
+EM_ASYNC_JS(char *, compiled_next, (int id), {
+    var result=await BrowseredSchemer.next(id),p=_malloc(lengthBytesUTF8(result)+1);
+    stringToUTF8(result,p,lengthBytesUTF8(result)+1);return p;
+});
+EM_JS(void, compiled_reply, (int id,const char *text), {BrowseredSchemer.reply(id,UTF8ToString(text));});
+EM_JS(void, compiled_finish, (int id), {BrowseredSchemer.finish(id);});
+static value_t web_schemer_run(value_t *args, uint32_t n)
+{
+    argcount("web-schemer-run",n,1);
+    char *request=strdup(string_arg(args[0],"web-schemer-run"));
+    char *start=compiled_begin(request);free(request);
+    int id=atoi(start);
+    if (!id) {value_t r=string_from_cstr(start);free(start);return r;}
+    free(start);
+    value_t result=FL_NIL;fl_gc_handle(&result);
+    for (;;) {
+        char *event=compiled_next(id);
+        if (event[0]=='R') {
+            result=string_from_cstr(event+2);free(event);compiled_finish(id);break;
+        }
+        value_t input=string_from_cstr(event+2);free(event);
+        result=fl_applyn(1,symbol_value(symbol("schemer-editor-request")),input);
+        char *answer=strdup(cvalue_data(result));compiled_reply(id,answer);free(answer);
+    }
+    fl_free_gc_handles(1);return result;
+}
+/*
+ * For web-layer.c: does the file (or buffer) KEY word-wrap?  That is,
+ * does markdown-wrap-row answer -1, as it does for the C core's display.
+ */
+int web_wraps(const char *key)
+{
+	int wraps = 0;
+	value_t f = FL_NIL;
+	fl_gc_handle(&f);
+	FL_TRY_EXTERN {
+		value_t proc = symbol_value(symbol("markdown-wrap-row"));
+		if (proc != UNBOUND) {
+			f = string_from_cstr((char *) key);
+			value_t r = fl_applyn(3, proc, f, FL_F, fixnum(80));
+			wraps = isfixnum(r) && numval(r) == -1;
+		}
+	} FL_CATCH_EXTERN { wraps = 0; }
+	fl_free_gc_handles(1);
+	return wraps;
+}
+
+/* (web-text-layer #t): Grammarly checks the selected window's buffer
+ * (web-layer.c); #f: the check ends; (): is it checking? */
+extern int web_layer_set(int on);
+extern int web_layer_on(void);
+static value_t web_text_layer(value_t *a, uint32_t n)
+{
+	if (n > 1) argcount("web-text-layer", n, 1);
+	if (n == 1) web_layer_set(a[0] != FL_F);
+	return web_layer_on() ? FL_T : FL_F;
+}
+
 static builtinspec_t web_builtins[] = {
 	{"run-program", web_run_program},
 	{"spawn-program", web_spawn_program},
 	{"web-call", web_call},
+	{"web-text-layer", web_text_layer},
+	{"web-schemer-run", web_schemer_run},
 	{"web-command-prompt", web_command_prompt},
 	{"ttfy-request", web_ttfy_request},
 	{"assistant-request", web_assistant_request},
 	{NULL, NULL}
 };
 
-void web_scheme_init(void) { assign_global_builtins(web_builtins); }
+extern void web_fast_init(void);   /* web-fast.c */
+void web_scheme_init(void) { assign_global_builtins(web_builtins); web_fast_init(); }

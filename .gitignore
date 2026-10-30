@@ -11,3 +11,5 @@ bkp/
 
 /site/
 /node_modules/
+# FUSE leftovers of files replaced while open
+.fuse_hidden*

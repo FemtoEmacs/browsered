@@ -2,6 +2,15 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<script>
+// The writing view's keys (C-x C-s, C-x C-c, C-s, its questions) are taken
+// by the first listener of the page, before extensions that add theirs
+// later (Grammarly's snippets take C-s); web/browsered.js sets the handler.
+window.browseredFirstKeys = null;
+window.addEventListener("keydown", function (e) {
+  if (window.browseredFirstKeys) window.browseredFirstKeys(e);
+}, true);
+</script>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Browsered</title>
 <script>
@@ -39,28 +48,89 @@ canvas { display: block; outline: none; cursor: text; position: relative; z-inde
   display: flex; flex-direction: column; font: 16px/1.5 -apple-system, "Segoe UI", sans-serif; }
 #writing-mode header { display: flex; flex-wrap: wrap; gap: 10px; padding: 12px; border-bottom: 1px solid #ccc; }
 #writing-mode header span { flex: 1; }
+.writing-caret { position: fixed; z-index: 5; pointer-events: none; width: 3px;
+  background: #b00020; box-shadow: 0 0 0 1px #fff; }
+.writing-caret[hidden] { display: none; }
+#editor, #writing-text { caret-color: #b00020; }
+.writing-search { padding: 8px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+.writing-search input { font: inherit; min-width: 220px; }
 #writing-mode button { padding: 6px 10px; }
 #writing-text { flex: 1; min-height: 200px; width: 100%; box-sizing: border-box; resize: none;
-  padding: 24px; border: 0; outline: none; font: 20px/1.7 Georgia, serif; color: #222; background: #fff; }
+  padding: 24px; border: 0; outline: none; font: 17px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; white-space: pre; tab-size: 8; overflow: auto; color: #222; background: #fff; }
 #writing-mode p { margin: 0; padding: 8px 16px; font-size: 13px; border-top: 1px solid #ddd; }
 .document-active #screen, .document-active #writing-toggle, .document-active #starting { display: none; }
 #writing-mode.document-default { position: static; height: 100vh; z-index: auto; }
 #editor { display: block; position: static; flex: 0 1 auto; box-sizing: border-box;
   margin: 20px auto; width: calc(100% - 48px); height: calc(100vh - 145px); min-height: 320px;
   resize: vertical; padding: 28px; border: 1px solid #b3bdb5; border-radius: 8px;
-  font: 20px/1.7 Georgia, serif; color: #222; background: #fff; }
+  font: 17px/1.5 ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace; white-space: pre; tab-size: 8; overflow: auto; color: #222; background: #fff; }
 .document-question { position: absolute; top: 80px; left: 10%; right: 10%; padding: 20px;
   border: 1px solid #aaa; border-radius: 8px; background: #fff; box-shadow: 0 8px 30px #0004; }
 .document-question textarea { display: block; width: 100%; min-height: 120px; margin: 12px 0; font: 18px/1.5 Georgia, serif; }
 .document-answer { max-height: 35vh; overflow: auto; padding: 16px 24px; border-top: 1px solid #ccc; background: #f4f7f5; }
 .document-answer button { margin-left: 20px; }
 .document-answer pre { white-space: pre-wrap; font: 17px/1.6 Georgia, serif; }
+/* The writing view looks like the advanced editor: its colours and font,
+   the text filling the window, a status line, and Emacs's minibuffer line
+   (C-s) under it with a blinking block cursor. */
+#writing-mode { background: #1d1f21; color: #c5c8c6;
+  font: 15px/1.3 Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace; }
+#writing-mode #editor, #writing-mode #writing-text { order: 1; flex: 1 1 auto; margin: 0; width: 100%; height: auto;
+  min-height: 0; border: 0; border-radius: 0; resize: none; outline: none; padding: 4px 8px;
+  background: #1d1f21; color: #c5c8c6; caret-color: #f0c674;
+  font: 15px/1.3 Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace; }
+#writing-mode #editor::selection, #writing-mode #writing-text::selection { background: #f0c674; color: #1d1f21; }
+/* colours: a <pre> behind the textarea, with the same font, padding and scroll */
+.writing-area { order: 1; flex: 1 1 auto; position: relative; min-height: 0; overflow: hidden; z-index: 0; }
+.document-question { z-index: 2; }
+.writing-colors, #writing-mode #editor.colored, #writing-mode #writing-text.colored {
+  position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; box-sizing: border-box; border: 0;
+  padding: 4px 8px; white-space: pre; tab-size: 8; letter-spacing: normal;
+  font: 15px/1.3 Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace; }
+.writing-colors { overflow: hidden; color: #c5c8c6; background: #1d1f21; pointer-events: none; }
+#writing-mode #editor.colored, #writing-mode #writing-text.colored { background: transparent; color: transparent;
+  -webkit-text-fill-color: transparent; caret-color: #f0c674; }
+#writing-mode #editor.colored::selection, #writing-mode #writing-text.colored::selection { background: #f0c67455; }
+.hl-comment, .hl-quote, .hl-pipe { color: #969896; } .hl-command, .hl-link { color: #81a2be; }
+.hl-env, .hl-em { color: #b294bb; } .hl-math, .hl-strong { color: #de935f; } .hl-escape, .hl-brace { color: #8abeb7; }
+.hl-section, .hl-heading { color: #f0c674; } .hl-code { color: #b5bd68; } .hl-list { color: #cc6666; }
+#writing-mode header { order: 2; gap: 0; padding: 1px 8px; border: 0; background: #373b41; color: #f0c674; align-items: center; }
+#writing-mode header span { flex: 1; font-weight: bold; }
+#writing-mode header button.writing-name { flex: 1; text-align: left; border-left: 0; padding-left: 0; font-weight: bold; }
+#writing-mode header button { background: none; border: 0; border-left: 1px solid #969896; color: #f0c674;
+  font: inherit; padding: 0 8px; cursor: pointer; }
+#writing-mode header button:hover { color: #1d1f21; background: #f0c674; }
+.writing-search { order: 3; padding: 1px 8px; gap: 0; background: #1d1f21; color: #c5c8c6; }
+.writing-search-text, .writing-search-label { white-space: pre; }
+.writing-search-text { display: inline-block; min-width: 1px; min-height: 1em; }
+.writing-search-cursor { display: inline-block; width: 0.6em; height: 1.15em; vertical-align: text-bottom;
+  background: #f0c674; animation: writing-blink 1.06s steps(1) infinite; }
+@keyframes writing-blink { 50% { opacity: 0; } }
+.writing-search [role=status] { margin-left: 1em; color: #cc6666; }
+.writing-search button { margin-left: auto; background: none; border: 0; color: #969896; font: inherit; cursor: pointer; }
+#writing-mode p.writing-message { order: 4; padding: 1px 8px; border: 0; font-size: inherit; color: #c5c8c6;
+  min-height: 1.3em; white-space: pre; overflow: hidden; }
+.writing-search ~ p.writing-message { display: none; }   /* one line: the search takes it */
+#writing-mode .writing-caret { background: #f0c674; box-shadow: none; }
+#writing-mode .document-answer { order: 5; background: #282a2e; border-top: 1px solid #373b41; }
+#writing-mode .document-question { background: #282a2e; border-color: #373b41; }
+/* the text Grammarly sees (textLayer, browsered.js): over the window's
+   rows, its letters unpainted (text-fill-color), the canvas under it shows
+   the text and the cursor.  Not color: transparent, nor autocomplete=off:
+   Grammarly ignores fields that look hidden or not for writing. */
+#text-layer { position: fixed; z-index: 1; margin: 0; padding: 0; border: 0; outline: none;
+  resize: none; overflow: hidden; background: transparent; color: #c5c8c6;
+  -webkit-text-fill-color: transparent; caret-color: transparent; white-space: pre-wrap; overflow-wrap: anywhere; word-break: normal;
+  tab-size: 8; -moz-tab-size: 8; font-kerning: none; font-variant-ligatures: none;
+  box-sizing: content-box; cursor: text; }
+#text-layer::selection { background: transparent; -webkit-text-fill-color: transparent; }
+/* M-x grammarly-show-field: the field's own letters, in red, to see it */
+#text-layer.shown { -webkit-text-fill-color: rgba(255, 80, 80, 0.8); }
 </style>
 </head>
 <body>
 <div id="starting">Starting Browsered… (if nothing happens, open Browsered.html?reset)</div>
 <canvas id="screen" aria-label="Browsered"></canvas>
-<button id="writing-toggle" type="button">Writing / Grammarly</button>
 <div id="notice" role="status" hidden></div>
 <noscript><p style="color:#c5c8c6;padding:20px">Browsered needs JavaScript.</p></noscript>
 <input id="keys" type="text" aria-label="Browsered input" autocomplete="off" autocorrect="off"

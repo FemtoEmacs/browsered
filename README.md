@@ -78,8 +78,8 @@ An editor such as Schememax has three layers:
    Schememax has two screen layers: `term.c` for a terminal and `gui.c`
    for a window of its own.
 
-Browsered keeps the first two layers unchanged and adds a third screen
-layer, `src/web.c`. The whole program, core and femtoscheme together, is
+Browsered keeps the C editing core and adds a third screen
+layer, `src/web.c`, plus a compiled Scheme execution path. The whole program, core and femtoscheme together, is
 compiled to WebAssembly, a machine language that every modern browser
 runs at nearly native speed. The page (`web/browsered.js`) paints the grid
 of cells on a canvas and sends each key back as the bytes a terminal would
@@ -87,6 +87,37 @@ send, so the core cannot tell a browser from a terminal.
 
 The Scheme scripts and femtoscheme's own image are packed into the same
 file, which is why `Browsered.html` is all you need.
+
+## Compiled Scheme
+
+Browsered includes Schemer, the Chez-inspired Scheme compiler, and the
+self-hosted WasmGC compiler seed. Schemer compiles Scheme to WasmGC
+inside the page without a second FemtoScheme compiler VM; no compiler installation or server is needed. Compatible
+Scheme command bodies compile on first invocation and retain their compiled
+procedures for later calls. `C-x C-e`, `C-M-x`, and `M-:` use the same route
+for compatible expressions and procedure definitions. `M-x schemer-status`
+shows compiled execution counts and compatibility handlers.
+
+Schemer and the older editor dialect are not completely compatible. Legacy
+macros, native ports and tables, higher-order editor callbacks, multiple-value
+native calls, and shared mutable editor objects keep explicit femtoscheme
+compatibility handlers. Top-level data definitions also use that environment
+so existing scripts can share their state. This is a staged integration:
+the editor core still runs FemtoScheme. It does not compile every existing
+editor script or make C editing primitives
+faster. Ordinary Scheme functions, including recursive functions, execute as
+compiled WebAssembly and can call editing primitives and interactive prompts.
+
+Compiled editor callbacks need WebAssembly JSPI (`WebAssembly.Suspending`
+and `WebAssembly.promising`). When those APIs are absent, the editor keeps
+its compatibility execution path. `M-x schemer-eval-buffer` explicitly runs
+a buffer as a compiled Scheme program; this requires WasmGC, and editor
+callbacks additionally require JSPI. Compiled R7RS text file ports share the
+editor filesystem and its existing save protection; file deletion through
+compiled ports is currently unsupported.
+
+The vendored compiler lives in `schemer/`; its source and integration details
+are described in [schemer/README.md](schemer/README.md).
 
 ## Keys
 
@@ -213,8 +244,21 @@ and runs `codex exec` in a private temporary workspace, read-only and
 ephemeral. Prompts and rendered PDF pages go to Codex; the login credentials
 stay in the CLI. Only the bridge's own local page can submit requests.
 There is no OpenAI API fallback, including when an old API key is saved.
-`M-x codex-status` explains the connection. Closing Browsered's editor does
-not stop the launcher; Ctrl-C in its terminal stops it.
+`M-x codex-status` explains the connection. C-x C-c in Browsered stops the
+launcher too, and its Terminal window closes (macOS may ask once to let
+Terminal control Terminal); Ctrl-C in its terminal also stops it.
+
+**Claude uses your Claude subscription** through the same launcher. Install
+Claude Code and log in once in a terminal (`curl -fsSL
+https://claude.ai/install.sh | bash`, then `claude`); a Pro, Max, Team or
+Enterprise plan is needed. Started from `Browsered.command`, the page asks
+Claude Code exactly as Schememax does (`claude -p`, no tools, no saved
+session), and the bridge removes inherited Anthropic API credentials, so
+the subscription is what is used. `BROWSERED_CLAUDE` can specify another
+`claude` executable; the terminal that starts the launcher says which one
+it found. `M-x assistant-status` shows the connection. Without the
+launcher (an HTML file opened directly), Claude needs an API key: `M-x
+set-claude-key`.
 
 The local page has its own browser storage, separate from an HTML file
 opened directly. Open your computer folders again as needed. Files stored
@@ -228,24 +272,49 @@ is stored in this browser and sent only to Anthropic.
 
 Hints, questions, discussions, C-c y and C-c t work as in Schememax.
 
-## Grammarly and writing mode
+## Grammarly
 
-The optional Writing / Grammarly field is a visible, spellchecked textarea, like the
-earlier Browsered. Grammarly appears automatically when its extension is
-installed and enabled for this page. Corrections are part of the document
-and Save saves them.
+**Every file opens in the editor itself**, prose too, with all of its keys,
+windows (C-x 2) and mode-line buttons. Grammarly checks only text fields of
+a page, never the canvas, so it stays quiet while you write. When you want
+a check, press **[GRAMMAR]** on the mode line (or `C-c d`): an invisible
+text field with the window's text is laid exactly over the window, and
+Grammarly underlines the editor's own text, where it is, at its size. You
+keep editing as always (the keys still go to the editor). A suggestion you
+accept becomes one change of the buffer, undone by one `C-/`. **[GRAMMAR]**
+again ends the check and the field goes away; so does showing another
+buffer. Only prose is checked (files that word-wrap: Markdown, TeX, text),
+never programs. Nothing is saved until you save.
+
+Should Grammarly stay silent, `M-x grammarly-status` says whether it is in
+the page and whether it took the field, and `M-x grammarly-show-field`
+paints the field's letters in red over the editor's (again: hidden).
+
+How: `src/web-layer.c` tells the page, at each redisplay, the window's
+rows and text; `textLayer` in `web/browsered.js` is the field;
+`toggle-grammarly` and `web-layer-edit` in `scheme/extensions/web.scm`
+start the check and apply corrections.
+
+The old writing view (a whole editor in a text field) is still there as
+`M-x document-editor`, but nothing opens it any more.
 
 Open chooses a file. Save writes it without a separate Browsered permission
 prompt, unless you explicitly enabled protection. ChatGPT opens a request field and shows
 the Codex reply below your document without replacing it. Quit asks before
 discarding unsaved changes.
 
-**Advanced editor** keeps the canvas-based Scheme/Emacs interface. Its
-**Writing / Grammarly** button returns to document editing. The canvas
-itself is not a text field and cannot show Grammarly's inline checking.
 The canvas is the default startup view; `?advanced` remains compatible.
 `M-x writing-mode` remains an optional temporary draft view, with Apply
 and Cancel; `M-x document-editor` opens the Grammarly-compatible document interface.
+
+## Speed
+
+Typing in a large LaTeX file takes about 4 ms a key, as in a program
+file (it took 127 ms). The colours of LaTeX and the rows of wrapped prose,
+worked out again at every key, run in C in the browser
+(`src/web-fast.c`), giving exactly what the Scheme in `tex.scm` and
+`markdown.scm` gives; `M-x scheme-highlighting` switches to the Scheme
+and back, to compare.
 
 ## Textify a PDF (C-c f) and plots (C-c p)
 
@@ -254,7 +323,7 @@ pages. Schememax renders the pages with macOS's Quartz; Browsered renders
 them in the page with pdf.js (Mozilla's PDF renderer, bundled in
 `Browsered.html`), at the same 144 dpi, and sends them as images through
 the chosen assistant: Codex uses the local subscription bridge, while Claude
-uses its configured API key. The Markdown opens in
+uses its configured API key (Claude Code through the bridge takes no images). The Markdown opens in
 a new buffer, with every table as an S-expression, as in Schememax.
 
 **C-c p** on an `(estimator-plot ...)` or `(data-table ...)` opens
@@ -382,3 +451,45 @@ próprio, sinta-se à vontade para fazê-lo.
 femtoscheme derives from femtolisp by Jeff Bezanson (BSD licence,
 `femtoscheme/LICENSE`); the editor core from Femto Emacs by Hugh Barney
 (public domain).
+
+`C-x C-w` (Save As) prefills the full current filename as an editable
+path, abbreviating home as `~`, and TAB completes directories and filenames.
+For unnamed buffers it starts at the normal remembered folder. Cancelling
+preserves the current filename and does not save a file.
+
+The Writing / Grammarly view uses a monospaced font, preserves tabs and spaces,
+and scrolls horizontally instead of wrapping long lines. Its textarea supports
+Emacs character/line movement (`C-b/f`, `C-a/e`, `C-p/n`), word movement (`M-b/f`),
+mark (`C-SPC`), kill/yank (`C-k`, `C-w`, `M-w`, `M-d`, `M-Backspace`, `C-y`),
+delete (`C-d`, `C-h`), undo (`C-/` or `C-_`), select all (`C-x h`), and
+save (`C-x C-s`). Escape followed by a key also works for Meta commands.
+Tab inserts a literal tab. This view implements these common editing keys;
+the advanced editor retains the full command set. Changes return to the
+current buffer; files are written only on an explicit Save.
+
+In the Writing / Grammarly view, `C-s` opens incremental forward search (the
+search line at the bottom) and
+`C-r` searches backward. Repeat those keys for the next/previous match,
+The document keeps keyboard focus and its cursor moves immediately before
+each match. Repeated search does not require Enter. Movement/editing keys
+accept the match and run immediately; Enter can also end search. `C-g`
+cancels and restores the original cursor. Offscreen matches scroll into view.
+`C-x C-s` remains Save. These search shortcuts are captured before ordinary
+page-level snippet handlers; browser extensions with global shortcuts may
+require changing their own shortcut assignment.
+
+Writing-view navigation also includes `M-<` / `M->` (file start/end),
+`Ctrl-Home` / `Ctrl-End`, and `C-v` / `M-v` (page down/up). On keyboards
+where Option combinations are inconvenient, press Escape then `<` or `>`.
+These movements scroll the cursor into view. A steady, thick, dark-red
+caret makes the insertion position visible without replacing the textarea
+that Grammarly uses; it hides when focus leaves the document or a region
+is selected.
+
+Shell commands in the `M-!` / `C-x @` window now support Tab completion
+at the cursor, preserving any command text after it. Tab expands a common
+prefix and repeated Tab cycles through ambiguous matches; paths with spaces
+and Unicode are supported. `C-c m` opens a one-line minibuffer command with
+Tab completion, Enter to run and `C-g` to cancel. Completion never executes
+the command. Native Schememax and the local Browsered launcher continue to
+run the full system shell.

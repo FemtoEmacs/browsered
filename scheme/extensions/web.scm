@@ -36,15 +36,145 @@
                  (unless (string=? before text) (undo-boundary "document-edit") (erase-buffer) (insert text))
                  (goto-char (json-get result "point"))
                  (cond
-                  ((string=? action "open") (find-file (json-get result "path")) (loop "" "Opened document."))
+                  ;; a program's file opens in the advanced editor
+                  ((string=? action "open")
+                   (find-file (json-get result "path"))
+                   (if (document-file? (json-get result "path")) (loop "" "Opened document.") #t))
                   ((string=? action "save")
                    (let ((saved (save-buffer (get-buffer-name))))
                      (loop reply (if saved "Saved." "The file was not saved; use Advanced editor to check its path or permissions."))))
+                  ;; a click on the file's name: its details, on the message line
+                  ((string=? action "file-info")
+                   (let-values (((lines words) (count-lines-words (buffer-substring 0 (buffer-size)))))
+                     (loop reply (concat (or (and (buffer-filename) (absolute-path (buffer-filename)))
+                                             (get-buffer-name))
+                                         "   " lines " lines, " words " words"
+                                         (if (buffer-modified-p) "   (changed)" "")))))
                   ((string=? action "codex")
                    (loop (guard (e (#t (string-append "Codex error: " (describe-error e))))
                            (codex-cli-ask (json-get result "request") text)) ""))
                   ((string=? action "quit") (quit-editor))
+                  ;; C-x C-f, C-x b: the editor's command; the buffer it
+                  ;; leaves comes back here if it is prose (or unchanged)
+                  ((string=? action "key")
+                   (let ((name (get-buffer-name)) (key (json-get result "key")))
+                     ;; C-x C-f opens the file only: this loop shows it
+                     (if (string=? key "C-x C-f")
+                         (execute-builtin "find-file")
+                         (let ((fn (get *keymap* key #f))) (when fn (call-command fn))))
+                     (cond ((string=? name (get-buffer-name)) (loop "" ""))
+                           ((document-file? (buffer-filename)) (loop "" ""))
+                           (else #t))))
                   (else #t)))))))))
+
+;; Prose opens in the writing view (where Grammarly works); programs stay
+;; in the advanced editor.  C-c d goes from one to the other.  With
+;; ?advanced in the page's address, everything stays in the advanced editor.
+(define *document-file-types* '("md" "markdown" "tex" "txt" "text" "rst"))
+
+(define (document-file? name)
+  (and (string? name)
+       (let ((ext (file-extension name)))   ; ".tex", or ""
+         (and (> (length ext) 1) (member (byte-substring ext 1) *document-file-types*) #t))))
+
+;; asked of the page once (?advanced), not at every C-x C-f
+(define *auto-document* 'unknown)
+(define (auto-document?)
+  (when (eq? *auto-document* 'unknown)
+    (set! *auto-document* (and (web-request "auto-document") #t)))
+  *auto-document*)
+
+(defcommand (find-file-or-document)
+  "C-x C-f: open a file.  Every file opens in the editor itself, where
+Grammarly checks prose (see web-layer-edit)."
+  (execute-builtin "find-file"))
+
+;;; ------------------------------------------------------------------
+;;; The text Grammarly sees
+;;; ------------------------------------------------------------------
+;;
+;; Grammarly reads only text fields of the page, never the canvas.  So
+;; [GRAMMAR] on the mode line (or C-c d) lays a transparent text field with
+;; the window's text exactly over it (src/web-layer.c says what the window
+;; shows; textLayer in browsered.js is the field); Grammarly underlines it
+;; there, over the editor's own text, at its own size.  The editor stays the
+;; only editor: keys still go to it.  When Grammarly corrects a word, the
+;; correction arrives here: one change of the buffer, which one C-/ undoes.
+;; [GRAMMAR] again ends the check and the field goes away, so Grammarly
+;; never nags while one simply writes; so does showing another buffer.
+;; Nothing is saved until you save.
+
+(define (starts-a-character? p)
+  (or (>= p (buffer-size))
+      (not (= (logand (aref (buffer-substring p (+ p 1)) 0) #xC0) #x80))))
+
+(define (web-layer-edit buffer page offset old new)
+  "From the page: Grammarly changed OLD, OFFSET bytes after PAGE (the
+window's first character) in BUFFER, into NEW.  Applied only when the
+buffer still holds OLD there; otherwise the page simply shows the buffer
+again, and Grammarly checks it again."
+  (let* ((from (+ page offset)) (to (+ from (length old))))
+    (when (and (string=? buffer (get-buffer-name))
+               (not (buffer-read-only?))
+               (<= to (buffer-size))
+               (starts-a-character? from)
+               (string=? (buffer-substring from to) old))
+      (let ((here (point)))
+        (undo-boundary "grammarly")
+        (replace-region from to new)
+        (goto-char (cond ((< here from) here)
+                         ((>= here to) (+ here (- (length new) (length old))))
+                         (else (+ from (min (- here from) (length new))))))))))
+
+(defcommand (toggle-grammarly)
+  "[GRAMMAR], C-c d: let Grammarly check this window's prose; again: done."
+  (cond ((not (in-browser?)) (message "Grammarly works only in Browsered."))
+        ((web-text-layer) (web-text-layer #f) (update-display) (message "Grammarly: done."))
+        ((not (word-wrap-file-p (or (buffer-filename) (get-buffer-name))))
+         (message "Grammarly checks prose (Markdown, TeX, text), not this buffer."))
+        (else (web-text-layer #t) (update-display)
+              (message "Grammarly: checking; [GRAMMAR] again when done."))))
+
+;;; ------------------------------------------------------------------
+;;; Speed: the busiest Scheme, in C (src/web-fast.c)
+;;; ------------------------------------------------------------------
+;;
+;; At every key the colours of a LaTeX window (up to 16 KB before it too)
+;; and the rows of word-wrapped prose are worked out again.  Interpreted
+;; under Asyncify that took some 130 ms a key in a LaTeX file.  In the
+;; browser the same procedures run in C, byte for byte the same
+;; (tests/fast-test.js compares them); tex.scm and markdown.scm stay the
+;; reference, and M-x scheme-highlighting brings them back.
+
+(define *scheme-latex-highlight* latex-highlight)
+(define *scheme-markdown-wrap-end* markdown-wrap-end)
+
+(define (use-fast-highlighting on)
+  (let ((tex (find-language "TeX")))
+    (when tex (vector-set! tex 12 (if on web-latex-highlight *scheme-latex-highlight*)))
+    (set! markdown-wrap-end (if on web-wrap-end *scheme-markdown-wrap-end*))
+    on))
+
+(when (and (in-browser?) (bound? 'web-latex-highlight))
+  (use-fast-highlighting #t))
+
+(defcommand (scheme-highlighting)
+  "Colour LaTeX and wrap prose with the Scheme procedures (slow, for checking); again: C."
+  (let ((on (not (eq? markdown-wrap-end web-wrap-end))))
+    (use-fast-highlighting on)
+    (update-display)
+    (message (if on "LaTeX colours and wrapping in C (fast)." "LaTeX colours and wrapping in Scheme (slow)."))))
+
+(defcommand (grammarly-status)
+  "Whether Grammarly is in the page, and whether it took the [GRAMMAR] field."
+  (message (or (web-request "grammarly-status") "Grammarly status: not in Browsered.")))
+
+(defcommand (grammarly-show-field)
+  "Paint the [GRAMMAR] field's letters in red over the editor's, or hide them."
+  (let ((r (web-request "grammarly-show-field")))
+    (message (cond ((not r) "Press [GRAMMAR] first.")
+                   ((string=? r "shown") "The field's letters are red.")
+                   (else "The field is invisible again.")))))
 
 (defcommand (writing-mode)
   "Edit this buffer in a visible text field compatible with Grammarly."
@@ -219,10 +349,31 @@ answer's status and text."
 
 (when (in-browser?)
 
+  ;; Claude: the subscription through Browsered.command's local bridge
+  ;; (Claude Code, as Schememax runs it), else an API key
+  (set! claude-program
+        (lambda () (let ((path (web-request "claude-bridge")))
+                     (and path (string-append path " (through Browsered.command)")))))
   (set! claude-transport
         (lambda ()
-          (if (anthropic-api-key) 'api
-              (error "Claude needs an API key in the browser: M-x set-claude-key"))))
+          (case *claude-transport*
+            ((cli api) *claude-transport*)
+            (else (cond ((web-request "claude-bridge") 'cli)
+                        ((anthropic-api-key) 'api)
+                        (else (error "Claude needs Browsered.command (your Claude subscription, with Claude Code installed) or an API key: M-x set-claude-key")))))))
+  (set! claude-cli-ask
+        (lambda (question context)
+          (let* ((reply (web-request "claude-ask"
+                         (string-append "{\"model\":" (json-string (or *claude-model* ""))
+                                        ",\"system\":" (json-string *assistant-instructions*)
+                                        ",\"question\":" (json-string (if (> (length (trim question)) 0)
+                                                                          question
+                                                                          "Give hints about the code at the cursor."))
+                                        ",\"context\":" (json-string context) "}")))
+                 (result (and reply (json-read reply))))
+            (cond ((not result) (error "Cannot reach Browsered's local bridge."))
+                  ((json-get result "error") (error (json-get result "error")))
+                  (else (or (json-get result "answer") (error "Claude returned no answer.")))))))
 
   (set! claude-api-ask
         (lambda (question context)
@@ -383,4 +534,224 @@ answer's status and text."
   (execute-builtin "find-file"))
 (when (in-browser?)
   (global-set-key "C-c m" 'minibuffer-command)
-  (global-set-key "C-c C-f" 'web-find-file))
+  (global-set-key "C-c C-f" 'find-file-or-document)
+  (global-set-key "C-x C-f" 'find-file-or-document)
+  (global-set-key "C-c d" 'toggle-grammarly)
+  ;; C-x C-r loads this again: one [GRAMMAR]
+  (unless (assoc "GRAMMAR" *mode-line-menu*)
+    (set! *mode-line-menu* (append *mode-line-menu* '(("GRAMMAR" toggle-grammarly))))))
+
+
+(define *schemer-current-call* '())
+(define *schemer-compiling-command* #f)
+(define (schemer-legacy-length value) (length value))
+(define *schemer-legacy-eval* eval-string)
+(define (schemer-module-arguments) *schemer-current-call*)
+(define (schemer-global-get name) (top-level-value name))
+(define (schemer-global-set! name value) (set-top-level-value! name value) value)
+
+;; Editor calls from compiled WebAssembly are serviced on the core's stack.
+;; Arguments are data, never evaluated as source text.
+(define (schemer-editor-request text)
+  (guard (e (#t (string-append "error " (describe-error e))))
+    (let* ((request (read (open-input-string text)))
+           (name (car request))
+           (fn (and (symbol? name) (bound? name) (top-level-value name))))
+      (if (procedure? fn)
+          (string-append "ok " (value->string (apply fn (cdr request))))
+          (string-append "error Unknown editor procedure: " (->string name))))))
+
+(define (schemer-request json)
+  (let ((raw ((top-level-value 'web-schemer-run) json)))
+    (when (starts-with-p "error " raw) (error raw))
+    (let ((result (json-read raw)))
+      (unless (string=? (json-get result "output") "") (display (json-get result "output")))
+      (unless (json-get result "ok") (error (json-get result "error")))
+      result)))
+(define (schemer-result result)
+  (let ((value (json-get result "value")))
+    (if (starts-with-p "#<" value) (void) (read (open-input-string value)))))
+(define (schemer-invoke module request)
+  (let ((previous *schemer-current-call*))
+    (dynamic-wind
+     (lambda () (set! *schemer-current-call* request))
+     (lambda () (schemer-result (schemer-request (concat "{\"module\":" module "}"))))
+     (lambda () (set! *schemer-current-call* previous)))))
+(define (schemer-forms text)
+  (let ((port (open-input-string text)))
+    (let loop ((acc '()))
+      (let ((form (read port)))
+        (if (eof-object? form) (reverse acc) (loop (cons form acc)))))))
+(define (schemer-symbols form)
+  (cond ((symbol? form) (list form))
+        ((not (pair? form)) '())
+        ((eq? (car form) 'quote) '())
+        (else (append (schemer-symbols (car form)) (schemer-symbols (cdr form))))))
+(define (schemer-globals forms defined)
+  (filter (lambda (name) (and (not (memq name defined)) (bound? name)
+                             (not (procedure? (top-level-value name)))))
+          (delete-duplicates (schemer-symbols forms))))
+(define (schemer-names-json names)
+  (concat "[" (string-join (map (lambda (n) (json-string (symbol->string n))) names) ",") "]"))
+(define (schemer-compiled-eval-string source)
+  (let* ((forms (schemer-forms source))
+         (definitions (filter (lambda (f) (and (pair? f) (eq? (car f) 'define) (pair? (cadr f)))) forms))
+         (names (map caadr definitions))
+         (globals (schemer-globals forms names)))
+    (if (null? names)
+        (schemer-result (schemer-request
+                         (concat "{\"source\":" (json-string source)
+                                 ",\"globals\":" (schemer-names-json globals) "}")))
+        (let* ((last (car (reverse forms)))
+               (body (if (and (pair? last) (eq? (car last) 'define))
+                         (append forms '((define %browsered-last (if #f #f))))
+                         (append (reverse (cdr (reverse forms))) (list (list 'define '%browsered-last last)))))
+               (factory `(lambda ()
+                           (let ((request (%editor-apply 'schemer-module-arguments '())))
+                             (case (car request)
+                               ,@(map (lambda (name) `((,name) (apply ,name (cdr request)))) names)
+                               ((%result) %browsered-last)
+                               (else (error "Unknown compiled procedure"))))))
+               (program (value->string (cons 'begin (append body (list factory)))))
+               (result (schemer-request (concat "{\"legacy\":" (if *schemer-compiling-command* "true" "false") ",\"source\":" (json-string program)
+                                                ",\"keep\":true,\"defined\":" (schemer-names-json names)
+                                                ",\"globals\":" (schemer-names-json globals) "}")))
+               (module (json-get result "module")))
+          (for-each (lambda (name)
+                      (set-top-level-value! name
+                         (let ((module module) (name name))
+                           (lambda args (schemer-invoke module (cons name args)))))) names)
+          (schemer-invoke module '(%result))))))
+
+(define (schemer-native-procedure-set? form)
+  (and (pair? form) (not (eq? (car form) 'quote))
+       (or (and (eq? (car form) 'set!) (symbol? (cadr form))
+                (bound? (cadr form)) (procedure? (top-level-value (cadr form))))
+           (schemer-native-procedure-set? (car form))
+           (schemer-native-procedure-set? (cdr form)))))
+(defvar *schemer-adapted-evaluations* 0)
+(define (schemer-eval-string source)
+  (let* ((forms (schemer-forms source))
+         (variables (schemer-globals forms '()))
+         (legacy (or
+                  (schemer-native-procedure-set? forms)
+                  (any (lambda (f) (and (pair? f) (memq (car f) '(define define-macro defcommand))
+                                       (or (not (eq? (car f) 'define)) (symbol? (cadr f))))) forms)
+                  (schemer-contains? forms '(io.write io.read io.tostring! io.close io.seek table table.keys put! get del! trycatch call-in-window-of))
+                  (any (lambda (n) (let ((v (top-level-value n)))
+                                    (not (or (number? v) (string? v) (boolean? v) (symbol? v) (null? v))))) variables))))
+    (cond (legacy (set! *schemer-adapted-evaluations* (+ 1 *schemer-adapted-evaluations*))
+                  (*schemer-legacy-eval* source))
+          ((and (= (length forms) 1) (pair? (car forms)) (eq? (caar forms) 'load)
+                (pair? (cdar forms)) (string? (cadar forms)))
+           (schemer-eval-string (file-contents (cadar forms))))
+          (else (schemer-compiled-eval-string source)))))
+
+(defvar *schemer-source-index* #f)
+(defvar *schemer-command-compiled* (table))
+(defvar *schemer-command-compatible* (table))
+(define (schemer-index-definitions form index)
+  (when (pair? form)
+    (cond ((and (memq (car form) '(define defcommand)) (pair? (cdr form)) (pair? (cadr form)))
+           (put! index (caadr form) (cons 'define (cdr form))))
+          ((eq? (car form) 'begin) (for-each (lambda (f) (schemer-index-definitions f index)) (cdr form))))))
+(define (schemer-command-definition name)
+  (unless *schemer-source-index*
+    (set! *schemer-source-index* (table))
+    (for-each
+     (lambda (path)
+       (guard (e (#t #f))
+         (let ((port (open-input-file path)))
+           (let loop ()
+             (let ((form (read port)))
+               (unless (eof-object? form)
+                 (schemer-index-definitions form *schemer-source-index*) (loop))))
+           (close-input-port port))))
+     (append (script-files) (if *load-user-scripts* (user-script-files) '()))))
+  (get *schemer-source-index* name #f))
+(define (schemer-contains? form symbols)
+  (cond ((symbol? form) (memq form symbols))
+        ((not (pair? form)) #f)
+        ((eq? (car form) 'quote) #f)
+        (else (or (schemer-contains? (car form) symbols) (schemer-contains? (cdr form) symbols)))))
+(define (schemer-legacy-form form)
+  ;; femtoscheme's optional argument notation is not R7RS syntax.
+  (let* ((head (cadr form)) (params (cdr head)))
+    (if (not (any pair? (if (list? params) params '()))) form
+        (let loop ((params params) (bindings '()) (rest '%browsered-args))
+          (if (null? params)
+              `(define (,(car head) . %browsered-args) (let* ,bindings ,@(cddr form)))
+              (let* ((param (car params)) (optional (pair? param))
+                     (name (if optional (car param) param))
+                     (value (if optional `(if (pair? ,rest) (car ,rest) ,(cadr param))
+                                `(if (pair? ,rest) (car ,rest) (error "Missing argument")))) )
+                (loop (cdr params) (append bindings (list (list name value) (list rest `(if (pair? ,rest) (cdr ,rest) '())))) rest)))))))
+(define (schemer-command-reason definition)
+  (cond ((not definition) "no standalone source definition")
+        ((memq (caadr definition) '(ask-claude ask-codex comment-dwim))
+         "native workflow with callbacks or language records")
+        ((schemer-contains? (cddr definition)
+            '(lambda guard let-values let*-values trycatch define-macro top-level-value eval eval-string load load-script
+              dynamic-wind apply map for-each filter sort fold fold-left fold-right scan
+              call-in-window-of call-with-values call-with-output-file call-with-input-file web-command-prompt))
+         "legacy macros, dynamic bindings or higher-order editor callbacks")
+        ((any (lambda (name)
+                (let ((value (top-level-value name)))
+                  (not (or (number? value) (string? value) (boolean? value) (symbol? value) (null? value)))))
+              (schemer-globals definition (list (caadr definition))))
+         "shared mutable editor object")
+        (else #f)))
+(defvar *schemer-original-call-command* call-command)
+(define (schemer-call-command fn)
+  (let* ((p (command-procedure fn))
+         (name (cond ((symbol? fn) fn) ((and p (not (builtin? p))) (function:name p)) (else #f))))
+    (cond ((not p) (*schemer-original-call-command* fn))
+          ((or (not (symbol? name)) (get *schemer-command-compiled* name #f)
+               (get *schemer-command-compatible* name #f)) (p))
+          (else
+           (let* ((definition (schemer-command-definition name))
+                  (reason (schemer-command-reason definition)))
+             (if reason (begin (put! *schemer-command-compatible* name reason) (p))
+                 (let ((compiled
+                        (guard (e (#t (put! *schemer-command-compatible* name (describe-error e)) #f))
+                          (dynamic-wind
+                            (lambda () (set! *schemer-compiling-command* #t))
+                            (lambda () (schemer-eval-string (value->string (schemer-legacy-form definition))))
+                            (lambda () (set! *schemer-compiling-command* #f)))
+                          (put! *schemer-command-compiled* name #t) #t)))
+                   ;; Never rerun a command after a runtime failure: it may
+                   ;; already have edited text. Only compile errors can adapt.
+                   (if compiled ((top-level-value name)) (p)))))))))
+(defcommand (schemer-status)
+  "Show compiled execution telemetry and compatibility adapters."
+  (let ((compiled (length (table.keys *schemer-command-compiled*)))
+        (adapted (length (table.keys *schemer-command-compatible*))))
+    (message "Schemer: " compiled " compiled editing commands; " adapted " compatibility handlers. "
+             (web-request "schemer-status"))))
+(when (and (in-browser?) (equal? (web-request "schemer-supported") "jspi"))
+  (set! call-command schemer-call-command)
+  (set! eval-for-message
+    (lambda (source)
+      (guard (e (#t (describe-error e)))
+        (let* ((result (call-quietly (lambda () (schemer-eval-string source))))
+               (printed (cdr result)))
+          (one-line (if (string=? printed "") (value->string (car result))
+                        (concat printed " => " (value->string (car result))))))))))
+
+
+(define (schemer-file-op op name text)
+  (let ((path (absolute-path name)))
+    (case op
+      ((0) (if (file-exists-p path) (json-string (file-contents path)) "false"))
+      ((1) (call-with-output-file path (lambda (port) (display text port))) "null")
+      ((2) (if (file-exists-p path) "true" "false"))
+      (else (error "Compiled file deletion is not supported by the editor filesystem")))))
+
+
+(defcommand (schemer-eval-buffer)
+  "Compile and run this buffer with Schemer, including editor procedure calls."
+  (let* ((source (buffer-substring 0 (buffer-size)))
+         (result (call-quietly
+                  (lambda () (schemer-result
+                     (schemer-request (concat "{\"source\":" (json-string source) "}")))))))
+    (message (one-line (concat (cdr result) " => " (value->string (car result)))))))

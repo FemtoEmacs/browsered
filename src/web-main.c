@@ -91,3 +91,14 @@ int __wrap_line_edit(char *prompt, char *buf, int nbuf, int flag,
     if (filename_prompt && result) web_remember_folder(buf);
     return result;
 }
+
+/* Save As uses filename completion too, including for unnamed buffers. */
+extern int __real_getfilename_default(char *, char *, int);
+int __wrap_getfilename_default(char *prompt, char *buf, int nbuf)
+{
+    int result;
+    filename_prompt++;
+    result = __real_getfilename_default(prompt, buf, nbuf);
+    filename_prompt--;
+    return result;
+}

@@ -20,6 +20,7 @@
 
 extern void set_scrap(unsigned char *);
 extern char *scheme_eval(char *);
+extern void web_layer_update(void);
 
 #define MAX_FACE 16
 
@@ -314,6 +315,7 @@ static void render(void)
 	}
 	web_paint((int) grid, rows, cols, cur_row, cur_col, (int) dbg,
 		  (int) (cursor_color & 0xFFFFFF));
+	web_layer_update();   /* the text Grammarly sees (web-layer.c) */
 	dirty = 0;
 }
 

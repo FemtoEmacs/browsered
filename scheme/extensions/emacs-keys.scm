@@ -215,6 +215,8 @@
         (let ((b (get j)))
           (cond ((open-byte-p b) (list-end get size j lispish))
                 ((close-byte-p b) #f)
+                ;; Outside Lisp, delimiters are punctuation steps, not empty atoms.
+                ((and (not lispish) (byte-in b ";,")) (+ j 1))
                 ((= b 34) (string-end get size j))
                 (else
                  (let loop ((j j))
@@ -233,6 +235,7 @@
                (j (cond ((and (close-byte-p b) (not (escaped-at-p get (- j 1)))) (list-start get j))
                         ((and (open-byte-p b) (not (escaped-at-p get (- j 1)))) #f)
                         ((= b 34) (string-start get j))
+                        ((and (not lispish) (byte-in b ";,")) (- j 1))
                         (else
                          (let loop ((j j))
                            (if (and (> j 0)
@@ -685,26 +688,46 @@ item keeps its marker, and the lines after it go under its text."
 
 ;;; comments
 
+(defvar *comment-column* 32)
+
+(define (line-comment-position text start language)
+  "Find a real line comment, ignoring markers inside strings and block comments."
+  (let loop ((runs (highlight-string text language)) (offset 0))
+    (and (pair? runs)
+         (let* ((run (car runs)) (end (+ offset (length (cdr run)))))
+           (if (and (= (car run) +comment+) (>= offset start)) offset
+               (loop (cdr runs) end))))))
+
 (defcommand (comment-dwim)
-  "M-;: with an active region, comment or uncomment its lines; otherwise
-go to this line's comment, or start one."
+  "M-;: toggle region comments, or insert/align this line's comment."
   (let ((comment (line-comment-start)))
     (cond ((not comment) (message "No comment syntax for this file"))
-          ((region-active-p) (comment-region-lines comment))
+          ((and (region-active-p) (not (= (point) (mark))))
+           (comment-region-lines comment))
           (else
            (let* ((ls (line-start)) (le (line-end ls))
-                  (text (buffer-substring ls le))
+                  (text (buffer-substring 0 le))
+                  (language (language-for-file (or (buffer-filename) (get-buffer-name))))
+                  (found (line-comment-position text ls language))
                   (single (if (string=? comment ";;") ";" comment))
-                  (found (string-search single text)))
-             (cond (found
-                    (goto-char (+ ls found))
-                    (let loop ()
-                      (when (and (< (point) le) (byte-in (buffer-get (point)) (string-append single " ")))
-                        (forward-char) (loop))))
-                   ((blank-line-p buffer-get (buffer-size) ls)
-                    (goto-char le)
-                    (insert comment " "))
-                   (else (goto-char le) (insert "  " single " "))))))))
+                  (end (or found le))
+                  (code-end (let loop ((i end))
+                              (if (and (> i ls) (memv (aref text (- i 1)) '(32 9)))
+                                  (loop (- i 1)) i))))
+             (cond ((= code-end ls)
+                    (goto-char (or found le))
+                    (unless found (insert comment " ")))
+                   (else
+                    (replace-region code-end end
+                      (make-string (max 1 (- *comment-column* (column-at text code-end))) #\space))
+                    (unless found (insert single " "))))
+             (when found
+               ;; Re-read the end after alignment changes the byte offsets.
+               (let ((end (line-end)))
+                 (let loop ()
+                   (when (and (< (point) end)
+                              (byte-in (buffer-get (point)) (string-append single " \t")))
+                     (forward-char) (loop))))))))))
 
 (define (comment-region-lines comment)
   (let* ((a (line-start (min (point) (mark))))

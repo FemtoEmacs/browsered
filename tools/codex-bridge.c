@@ -1,6 +1,11 @@
-/* Browsered's optional local Codex bridge. Build with make codex-bridge.
- * Serves only Browsered.html and invokes the signed-in CLI, never an API key.
- * Protocol: model newline, image-count newline, base64 PNG lines, UTF-8 prompt.
+/* Browsered's optional local bridge to the assistants' programs. Build with
+ * make codex-bridge.  Serves only Browsered.html and invokes the signed-in
+ * CLIs, never an API key: codex with the ChatGPT sign-in, claude (Claude
+ * Code) with the Claude subscription.
+ * /codex: model newline, image-count newline, base64 PNG lines, UTF-8 prompt.
+ * /claude: model newline, byte count of the instructions newline, byte count
+ * of the question newline, the instructions, the question, then the context
+ * (claude's standard input), as Schememax's claude-cli-ask runs it.
  */
 #define _DARWIN_C_SOURCE
 #define _DEFAULT_SOURCE
@@ -29,7 +34,7 @@
 
 #define MAX_BODY (48U * 1024 * 1024)
 #define MAX_REPLY (8U * 1024 * 1024)
-static char program[PATH_MAX], page[PATH_MAX], host[64], origin[96];
+static char program[PATH_MAX], claude[PATH_MAX], page[PATH_MAX], host[64], origin[96];
 static int port = 8767;
 
 static bool send_all(int fd, const void *data, size_t n) {
@@ -75,7 +80,7 @@ static bool write_file(const char *path, const void *data, size_t size) {
 static void private_path(char *out, const char *dir, const char *name) {
     snprintf(out, PATH_MAX, "%s/%s", dir, name);
 }
-static int run(char *const args[], const char *dir, const char *input, const char *log) {
+static int run_program(const char *exe, char *const args[], const char *dir, const char *input, const char *log) {
     pid_t child = fork(); if (child < 0) return -1;
     if (!child) {
         setpgid(0, 0);
@@ -86,7 +91,10 @@ static int run(char *const args[], const char *dir, const char *input, const cha
         /* Never let inherited API credentials change the billing path. */
         unsetenv("OPENAI_API_KEY"); unsetenv("CODEX_API_KEY");
         unsetenv("OPENAI_BASE_URL"); unsetenv("CODEX_BASE_URL");
-        execv(program, args); _exit(127);
+        unsetenv("ANTHROPIC_API_KEY"); unsetenv("ANTHROPIC_AUTH_TOKEN");
+        unsetenv("ANTHROPIC_BASE_URL"); unsetenv("CLAUDE_CODE_USE_BEDROCK");
+        unsetenv("CLAUDE_CODE_USE_VERTEX");
+        execv(exe, args); _exit(127);
     }
     for (int i = 0; i < 3000; ++i) {
         int status = 0; pid_t k = waitpid(child, &status, WNOHANG);
@@ -96,6 +104,9 @@ static int run(char *const args[], const char *dir, const char *input, const cha
     }
     kill(-child, SIGTERM); struct timespec pause = {1, 0}; nanosleep(&pause, NULL);
     kill(-child, SIGKILL); waitpid(child, NULL, 0); return -1;
+}
+static int run(char *const args[], const char *dir, const char *input, const char *log) {
+    return run_program(program, args, dir, input, log);
 }
 static int base64_value(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
@@ -126,6 +137,7 @@ static char *take_line(char **cursor) {
     *end = 0; *cursor = end + 1; return s;
 }
 static void codex_request(int fd, char *body) {
+    if (!*program) { message(fd, 502, "Codex is not installed on this computer (or set BROWSERED_CODEX)."); return; }
     char *p = body, *model = take_line(&p), *count_text = take_line(&p), *end;
     if (!model || !count_text || strlen(model) > 100 || !*count_text) { message(fd, 400, "Invalid Codex request."); return; }
     for (char *s = model; *s; ++s) if (!isalnum((unsigned char)*s) && !strchr("-._", *s)) { message(fd, 400, "Invalid model name."); return; }
@@ -170,6 +182,40 @@ cleanup:
     unlink(input); unlink(output); unlink(log);
     for (int i = 0; i < made; ++i) unlink(images[i]);
     rmdir(dir);
+}
+
+/* Claude Code with the Claude subscription: no tools, no session, as
+ * Schememax's claude-cli-ask (scheme/extensions/assistant.scm). */
+static void claude_request(int fd, char *body, size_t length) {
+    if (!*claude) { message(fd, 502, "Claude Code is not installed on this computer. Install it and log in once in a terminal: curl -fsSL https://claude.ai/install.sh | bash, then claude."); return; }
+    char *p = body, *model = take_line(&p), *system_text = take_line(&p), *question_text = take_line(&p), *end;
+    if (!model || !system_text || !question_text || strlen(model) > 100) { message(fd, 400, "Invalid Claude request."); return; }
+    for (char *s = model; *s; ++s) if (!isalnum((unsigned char)*s) && !strchr("-._[]", *s)) { message(fd, 400, "Invalid model name."); return; }
+    unsigned long system_n = strtoul(system_text, &end, 10); if (*end) { message(fd, 400, "Invalid Claude request."); return; }
+    unsigned long question_n = strtoul(question_text, &end, 10); if (*end) { message(fd, 400, "Invalid Claude request."); return; }
+    size_t left = length - (size_t)(p - body);
+    if (system_n > left || question_n > left - system_n) { message(fd, 400, "Invalid Claude request."); return; }
+    char *instructions = strndup(p, system_n), *question = strndup(p + system_n, question_n);
+    char *context = p + system_n + question_n;
+    char dir[] = "/tmp/browsered-claude-XXXXXX";
+    if (!instructions || !question || !mkdtemp(dir)) { free(instructions); free(question); message(fd, 502, "Cannot create private Claude workspace."); return; }
+    char input[PATH_MAX], log[PATH_MAX];
+    private_path(input, dir, "context.txt"); private_path(log, dir, "answer.txt");
+    if (!write_file(input, context, strlen(context))) { message(fd, 502, "Cannot write the context."); goto cleanup; }
+    char *args[16]; int n = 0;
+    args[n++] = claude; args[n++] = "-p"; args[n++] = "--tools"; args[n++] = "";
+    args[n++] = "--no-session-persistence"; args[n++] = "--append-system-prompt"; args[n++] = instructions;
+    if (*model) { args[n++] = "--model"; args[n++] = model; }
+    args[n++] = question; args[n] = NULL;
+    int status = run_program(claude, args, dir, input, log);
+    size_t size = 0; char *answer = read_file(log, MAX_REPLY, &size);
+    if (status == 0 && answer && size) reply(fd, 200, "text/plain; charset=utf-8", answer, size);
+    else message(fd, 502, answer && *answer ? answer
+                 : "Claude Code did not answer (not logged in? run claude once in a terminal).");
+    free(answer);
+cleanup:
+    unlink(input); unlink(log); rmdir(dir);
+    free(instructions); free(question);
 }
 
 /* Explicit shell requests from the editor, restricted to its own origin. */
@@ -343,7 +389,7 @@ static void handle(int fd) {
     char method[16], url[256], version[16];
     if (sscanf(header, "%15s %255s %15s", method, url, version) != 3) { message(fd, 400, "Invalid request."); return; }
     if (!strcmp(method, "GET")) { char *query = strchr(url, '?'); if (query) *query = 0; }
-    char host_value[128] = "", origin_value[128] = "", content_type[128] = "";
+    char host_value[128] = "", origin_value[128] = "", content_type[128] = "", fetch_site[32] = "";
     size_t length = 0; bool has_length = false, valid_length = true;
     for (char *line = strstr(header, "\r\n") + 2; *line && strncmp(line, "\r\n", 2); ) {
         char *next = strstr(line, "\r\n"); if (!next) break; *next = 0;
@@ -352,6 +398,7 @@ static void handle(int fd) {
             if (!strcasecmp(line, "Host")) snprintf(host_value, sizeof(host_value), "%s", value);
             if (!strcasecmp(line, "Origin")) snprintf(origin_value, sizeof(origin_value), "%s", value);
             if (!strcasecmp(line, "Content-Type")) snprintf(content_type, sizeof(content_type), "%s", value);
+            if (!strcasecmp(line, "Sec-Fetch-Site")) snprintf(fetch_site, sizeof(fetch_site), "%s", value);
             if (!strcasecmp(line, "Content-Length")) { char *end; errno = 0; unsigned long long v = strtoull(value, &end, 10);
                 if (has_length || errno || *end || !*value || *value == '-' || v > MAX_BODY) valid_length = false;
                 has_length = true; length = v <= MAX_BODY ? (size_t)v : 0;
@@ -369,8 +416,26 @@ static void handle(int fd) {
     if (!strcmp(method, "GET") && !strcmp(url, "/codex/status")) {
         message(fd, 200, "Browsered local Codex bridge: ChatGPT sign-in required; API billing disabled."); return;
     }
-    if (strcmp(method, "POST") || (strcmp(url, "/codex") && strcmp(url, "/shell") && strcmp(url, "/files"))) { message(fd, 404, "Not found."); return; }
-    if (strcmp(origin_value, origin) || strcmp(content_type, !strcmp(url, "/files") ? "application/x-browsered-files" : !strcmp(url, "/shell") ? "application/x-browsered-shell" : "application/x-browsered-codex")) { message(fd, 403, "Only Browsered's own local page can call Codex."); return; }
+    if (!strcmp(method, "GET") && !strcmp(url, "/claude/status")) {
+        char text[PATH_MAX + 64]; snprintf(text, sizeof(text), "Browsered Claude bridge: %s", claude);
+        if (*claude) message(fd, 200, text); else message(fd, 404, "Claude Code is not installed."); return;
+    }
+    /* C-x C-c in the page: the launcher stops (Browsered.command then closes its window) */
+    /* A beacon (sent even as the tab closes) has a plain text type: the page
+     * is recognized by its origin (or, without one, by Sec-Fetch-Site) */
+    if (!strcmp(method, "POST") && !strcmp(url, "/quit")) {
+        bool own = *origin_value ? !strcmp(origin_value, origin) : !strcmp(fetch_site, "same-origin");
+        if (!own) {
+            printf("Browsered: a request to stop the launcher was refused (Origin \"%s\", Sec-Fetch-Site \"%s\").\n",
+                   origin_value, fetch_site); fflush(stdout);
+            message(fd, 403, "Only Browsered's own local page can stop the launcher."); return;
+        }
+        printf("Browsered: C-x C-c in the editor; the launcher stops.\n"); fflush(stdout);
+        message(fd, 200, "Browsered launcher stopped.");
+        kill(getppid(), SIGTERM); return;
+    }
+    if (strcmp(method, "POST") || (strcmp(url, "/codex") && strcmp(url, "/claude") && strcmp(url, "/shell") && strcmp(url, "/files"))) { message(fd, 404, "Not found."); return; }
+    if (strcmp(origin_value, origin) || strcmp(content_type, !strcmp(url, "/files") ? "application/x-browsered-files" : !strcmp(url, "/shell") ? "application/x-browsered-shell" : !strcmp(url, "/claude") ? "application/x-browsered-claude" : "application/x-browsered-codex")) { message(fd, 403, "Only Browsered's own local page can call the assistants."); return; }
     if (!has_length || !valid_length || !length) { message(fd, 413, "Invalid request size."); return; }
     char *body = malloc(length + 1); if (!body) { message(fd, 502, "Out of memory."); return; }
     size_t n = 0;
@@ -379,6 +444,7 @@ static void handle(int fd) {
     if (n != length || (strcmp(url,"/files") && memchr(body, 0, n))) message(fd, 400, "Incomplete or invalid request body.");
     else if (!strcmp(url, "/files")) files_request(fd, body, n);
     else if (!strcmp(url, "/shell")) shell_request(fd, body);
+    else if (!strcmp(url, "/claude")) claude_request(fd, body, n);
     else codex_request(fd, body);
     free(body);
 }
@@ -394,6 +460,22 @@ static bool find_codex(void) {
     while (part) { snprintf(program, sizeof(program), "%s/codex", part); if (!access(program, X_OK)) { found = true; break; } part = strtok_r(NULL, ":", &save); }
     free(copy); return found;
 }
+/* claude: BROWSERED_CLAUDE, the PATH, then where its installers put it */
+static bool find_claude(void) {
+    const char *override = getenv("BROWSERED_CLAUDE");
+    if (override && *override) { snprintf(claude, sizeof(claude), "%s", override); return access(claude, X_OK) == 0; }
+    const char *path = getenv("PATH"); char *copy = strdup(path ? path : ""); if (!copy) return false;
+    char *save, *part = strtok_r(copy, ":", &save); bool found = false;
+    while (part) { snprintf(claude, sizeof(claude), "%s/claude", part); if (!access(claude, X_OK)) { found = true; break; } part = strtok_r(NULL, ":", &save); }
+    free(copy); if (found) return true;
+    const char *home = getenv("HOME");
+    const char *places[] = {"%s/.local/bin/claude", "%s/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude", NULL};
+    for (int i = 0; places[i]; ++i) {
+        snprintf(claude, sizeof(claude), places[i], home ? home : "");
+        if (!access(claude, X_OK)) return true;
+    }
+    claude[0] = 0; return false;
+}
 int main(int argc, char **argv) {
     bool open_browser = true;
     for (int i = 1; i < argc; ++i) {
@@ -403,7 +485,9 @@ int main(int argc, char **argv) {
         } else if (!strcmp(argv[i], "--page") && i + 1 < argc) { if (!realpath(argv[++i], page)) { perror("Browsered.html"); return 1; } }
         else { fprintf(stderr, "Usage: %s --page Browsered.html [--serve] [--port 8767]\n", argv[0]); return 2; }
     }
-    if (!*page || !find_codex()) { fprintf(stderr, "Browsered: cannot find Browsered.html or Codex. Set BROWSERED_CODEX to the Codex executable.\n"); return 1; }
+    bool has_codex = find_codex(); if (!has_codex) program[0] = 0;
+    bool has_claude = find_claude();
+    if (!*page || (!has_codex && !has_claude)) { fprintf(stderr, "Browsered: cannot find Browsered.html, or neither Codex nor Claude Code. Set BROWSERED_CODEX or BROWSERED_CLAUDE to the program.\n"); return 1; }
     signal(SIGPIPE, SIG_IGN); signal(SIGCHLD, SIG_IGN);
     int server = socket(AF_INET, SOCK_STREAM, 0); if (server < 0) return 1;
     fcntl(server, F_SETFD, FD_CLOEXEC);
@@ -412,7 +496,8 @@ int main(int argc, char **argv) {
     if (bind(server, (struct sockaddr *)&address, sizeof(address)) || listen(server, 8)) { perror("Browsered local port"); close(server); return 1; }
     socklen_t address_size = sizeof(address); getsockname(server, (struct sockaddr *)&address, &address_size); port = ntohs(address.sin_port);
     snprintf(host, sizeof(host), "127.0.0.1:%d", port); snprintf(origin, sizeof(origin), "http://%s", host);
-    printf("Browsered Codex: %s/\nKeep this launcher running while using the editor.\n", origin); fflush(stdout);
+    printf("Browsered: %s/\nCodex: %s\nClaude Code: %s\nKeep this launcher running while using the editor.\n",
+           origin, has_codex ? program : "not found", has_claude ? claude : "not found"); fflush(stdout);
     if (open_browser && !fork()) {
 #ifdef __APPLE__
         execl("/usr/bin/open", "open", origin, (char *)NULL);

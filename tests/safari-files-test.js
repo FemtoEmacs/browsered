@@ -20,7 +20,7 @@ const fs=require('fs'), os=require('os'), path=require('path'), assert=require('
  response=await request('write',dir+'/new.bin',Buffer.from([0,255,129,4]));assert.equal(response.status,200);assert.deepEqual(fs.readFileSync(dir+'/new.bin'),Buffer.from([0,255,129,4]));
  browser=await chromium.launch(process.env.BROWSERED_TEST_CHANNEL ? {channel:process.env.BROWSERED_TEST_CHANNEL} : {});
  const page=await browser.newPage();await page.addInitScript(()=>{Object.defineProperty(window,'showDirectoryPicker',{value:undefined});Object.defineProperty(window,'showOpenFilePicker',{value:undefined});});
- await page.goto(base);await page.waitForTimeout(1800);
+ await page.goto(base+'/?advanced');await page.waitForTimeout(1800);
  const keys=async(...ks)=>{for(const k of ks) await page.keyboard.press(k);};
  const scheme=async expr=>{await page.evaluate(()=>Module.browsered._test=null);await keys('Escape',':');await page.keyboard.type('(web-request "test-result" (with-output-to-string (lambda () (write '+expr+'))))');await keys('Enter');await page.waitForFunction(()=>Module.browsered._test!==null);await page.waitForTimeout(150);return page.evaluate(()=>Module.browsered._test);};
  page.once('dialog',d=>d.accept(dir));
