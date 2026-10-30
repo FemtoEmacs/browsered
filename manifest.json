@@ -1,9 +1,0 @@
-{
-  "manifest_version": 3,
-  "name": "Browsered — Emacs keys",
-  "version": "0.1.0",
-  "description": "Emacs keybindings in ordinary browser text fields.",
-  "permissions": ["activeTab", "scripting"],
-  "background": {"service_worker": "background.js"},
-  "action": {"default_title": "Toggle Emacs keys on this page"}
-}

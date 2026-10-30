@@ -15,6 +15,11 @@
 #include <errno.h>
 #include "llt.h"
 #include "flisp.h"
+#include <math.h>
+
+/* print.c */
+void snprint_real(char *s, size_t cnt, double r, int width, int dec,
+                  int max_digs_rt, int max_digs_lf);
 
 value_t fl_stringp(value_t *args, u_int32_t nargs)
 {
@@ -363,6 +368,25 @@ value_t fl_numbertostring(value_t *args, u_int32_t nargs)
     value_t n = args[0];
     int neg = 0;
     uint64_t num;
+    if (iscprim(n) && nargs == 1) {
+        /* Reals print as `write` prints them; number->string used to
+           truncate 0.8 to "0". */
+        numerictype_t nt = cp_numtype((cprim_t*)ptr(n));
+        if (nt == T_DOUBLE || nt == T_FLOAT) {
+            double d = nt == T_DOUBLE ? *(double*)cp_data((cprim_t*)ptr(n))
+                                      : (double)*(float*)cp_data((cprim_t*)ptr(n));
+            char rbuf[64];
+            if (!DFINITE(d))
+                strcpy(rbuf, isnan(d) ? "+nan.0" : (d < 0 ? "-inf.0" : "+inf.0"));
+            else if (d == 0)
+                strcpy(rbuf, 1/d < 0 ? "-0.0" : "0.0");
+            else {
+                snprint_real(rbuf, sizeof(rbuf), d, 0, nt == T_DOUBLE ? 16 : 8, 3, 10);
+                if (!strpbrk(rbuf, ".eE")) strcat(rbuf, ".0");
+            }
+            return string_from_cstr(rbuf);
+        }
+    }
     if (isfixnum(n))      num = numval(n);
     else if (!iscprim(n)) type_error("number->string", "integer", n);
     else num = conv_to_uint64(cp_data((cprim_t*)ptr(n)),

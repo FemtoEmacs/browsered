@@ -1,18 +1,13 @@
-# Build products
-/Browsered.app/
-/site/
-femtoscheme/*.o
-femtoscheme/*.a
+# built by make (Browsered.html is kept: it is what users open)
+build/
+browsered-term
+*.o
+*.a
 femtoscheme/femtoscheme
-femtoscheme/femtoscheme.boot.bak
-femtoscheme/femtoscheme.boot.new
-femtoscheme/llt/*.o
-femtoscheme/llt/*.a
-tests/pdf-tests
-# Generated documents
-/output/
+tests/search-test
+git/next-commit.txt
 .DS_Store
-*~
-/windows/stage/
-/windows/build/
-/windows/dist/
+bkp/
+
+/site/
+/node_modules/

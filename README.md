@@ -1,239 +1,370 @@
-# Browsered
+# Browsered: Schememax in the browser
 
-Emacs keys in existing browser text fields. Click the extension once on an
-editor page: its badge reads ON. Click again to turn the bindings off.
-After reloading or opening another page, enable it again.
+Browsered is the Schememax editor running inside a web browser. It has
+the same Emacs keys, the same menus on the mode line, the same help page,
+colours, indentation and assistants, and the same Scheme scripts that
+customize it. It is one file, `Browsered.html`, that opens in any recent
+browser on macOS, Windows or Linux, with nothing to install and nothing
+to build.
 
-The existing textarea stays in place, so CPS-100 can check and correct it.
-Supported fields: textareas and ordinary text inputs. Rich text editors,
-password fields, and editors inside separate frames are outside this version.
+To use your **Codex subscription allowance**, launch `Browsered.command`
+instead of opening the HTML directly. It uses the installed, ChatGPT-signed-in
+Codex CLI through a small local bridge; it does not use OpenAI API credits.
 
-## Open the editor
+## Contents
 
-Double-click **Browsered.app**. It starts the native helper and opens Chrome.
-No terminal, installed runtime, or compilation is needed. You can bookmark
-http://127.0.0.1:8766/ once the app is running. Text saves in Chrome locally.
-The file version keeps a separate draft; use Open and Save to transfer it.
-**Open** (Ctrl+X Ctrl+F) visits a file chosen in Chrome's file picker.
-**Save** (Ctrl+X Ctrl+S) writes back to that same file; Chrome asks once
-for permission to change it. With no visited file, Save asks where to save.
-Ctrl+X Ctrl+W saves to a new file. Where the file picker is unavailable
-(for example outside Chrome), Open uses an upload dialog and Save downloads.
-After reloading the page, Save asks for the file again. **Copy all** copies the whole document;
-**Paste** inserts clipboard text at the cursor or replaces the selection.
-Chrome may ask for clipboard access when you click Paste. The top toolbar has **Keybindings**,
-**Claude**, **ChatGPT**, and **Codex** buttons.
-Use **Ctrl+H R** for Claude, **Ctrl+H G** for ChatGPT, and **Ctrl+H K**
-for keybindings (release Ctrl before the second key). **Ctrl+H** opens all bindings;
-**Esc**, **Ctrl+G**, or **Ctrl+H** closes help and returns focus to the editor.
-Claude (Ctrl+H R) and ChatGPT (Ctrl+H G) open an empty request box. Type your
-request and click Enviar pedido e documento. Browsered sends the request and
-current document to Anthropic through your existing Claude Code login, or to
-OpenAI through your existing ChatGPT login. The response and file links
-appear in this same box, without opening another window. PDF requests
-produce a PDF from the assistant's final text. Keybindings lists the shortcuts.
-Codex opens its page.
+1. [Starting](#starting)
+2. [How it works](#how-it-works)
+3. [Keys](#keys)
+4. [Files and folders](#files-and-folders)
+5. [Settings and scripts](#settings-and-scripts)
+6. [Assistants](#assistants)
+7. [Textify a PDF (C-c f) and plots (C-c p)](#textify-a-pdf-c-c-f-and-plots-c-c-p)
+8. [What the browser does not allow](#what-the-browser-does-not-allow)
+9. [When something goes wrong](#when-something-goes-wrong)
+10. [Building and testing](#building-and-testing-development-only)
+11. [Layout](#layout)
+12. [Staying close to Schememax](#staying-close-to-schememax)
+13. [Notice](#notice)
 
-The Claude adapter runs the Claude Code CLI (`claude -p`) found in
-`~/.local/bin`, `~/.claude/local`, `/opt/homebrew/bin` or `/usr/local/bin`.
-Install it and run `claude` once in Terminal to log in. File, shell and web
-tools are disallowed, and it runs from an empty temporary directory, so
-Claude sees only the request and the document. The ChatGPT adapter uses the
-native Codex CLI bundled with the installed ChatGPT app, in read-only mode
-without self-approval. Both return structured results that can include
-PDF, text, Markdown, CSV, or HTML. Browsered creates these files locally.
-It does not grant the assistant general filesystem write access.
+## Starting
 
-## PDF and Markdown formatting
+[Run Browsered in your browser](https://femtoemacs.github.io/browsered/).
+The hosted editor starts immediately; no installation or account is needed.
+Chrome and Edge can open and save folders through their browser picker.
+Safari can edit uploaded files and download them; direct folder saving,
+shell commands and your Codex subscription require the local launcher.
 
-PDF artifacts retain Markdown formatting. The native renderer reads
-`formatting.xml` for every PDF: page dimensions, margins, fonts, heading sizes,
-alignment, indentation and spacing. The copy next to Browsered.app is editable;
-the bundled copy is used when the app is moved by itself. Invalid or incomplete
-rules stop PDF generation instead of silently reverting to plain text.
+For the full local version, [download the source](https://github.com/FemtoEmacs/browsered/archive/refs/heads/main.zip)
+or clone this repository, then run `Browsered.command` (macOS/Linux).
+The launcher needs a C compiler (`cc`) and an installed Codex CLI signed
+in with ChatGPT. You do not need Emscripten or Node.js to use it.
 
-Supported formatting: headings 1–6, bold, italic, combined emphasis, ordered
-and unordered lists (including nesting), block quotes, inline and fenced code,
-tables, link labels, horizontal rules and explicit line breaks. Image contents
-and raw HTML styling are outside this text renderer.
 
-The assistant returns PDF content as Markdown. The renderer applies the XML
-rules to the parsed Markdown; the assistant does not decide whether to apply
-those rules. Both Markdown parsing and XML reading use macOS system libraries.
+For Codex, double-click **Browsered.command** on macOS, or run
+`./Browsered.command` / `make run` on macOS or Linux. Use the local page
+it opens and keep the launcher running.
 
-Run `./tests/run-pdf-tests.sh` to verify font styles, XML-driven page and heading
-sizes, and rejection of missing or incomplete XML.
+Once the launcher is running, opening `Browsered.html` normally also takes
+you straight to the connected local page. This includes opening the file
+from a bookmark or browser menu. For deliberate offline editing, open
+`Browsered.html?standalone`; Codex is unavailable in that mode.
 
-## Scheme scripting
+Chrome and Edge use their folder picker. Safari and Firefox use the local
+helper for opening and saving files and folders: start Browsered.command,
+then use its local page. Safari can be started from Terminal with
+`open -a Safari http://127.0.0.1:8767/`.
 
-Browsered is programmable in Scheme, the way Emacs is in Emacs Lisp. The
-language is femtoscheme (in `femtoscheme/`): a subset of R7RS-small derived
-from femtolisp, compiled to WebAssembly and built into the page, so nothing
-needs installing. See `femtoscheme/README.md` for the language itself.
+The editor starts in the advanced Scheme/Emacs interface; C-h or F1 shows
+its keys. Click Writing / Grammarly to edit the current buffer in a normal
+text field with Grammarly support. Its Advanced editor button returns to
+the main editor.
 
-| Keys | Action |
+## How it works
+
+An editor such as Schememax has three layers:
+
+1. **The core**, written in C: buffers, windows, the cursor, searching,
+   the prompt at the bottom (the minibuffer), and the loop that reads a
+   key and runs its command.
+2. **The scripts**, written in Scheme and run by femtoscheme, a small
+   Scheme bundled with the editor. They define almost everything you see:
+   the key bindings, the commands, indentation, colours, the menus, the
+   help page, the assistants.
+3. **The screen.** The core does not draw by itself. It writes characters
+   into a grid of cells, like the cells of a terminal, and a screen layer
+   puts that grid in front of you and returns the keys you press.
+   Schememax has two screen layers: `term.c` for a terminal and `gui.c`
+   for a window of its own.
+
+Browsered keeps the first two layers unchanged and adds a third screen
+layer, `src/web.c`. The whole program, core and femtoscheme together, is
+compiled to WebAssembly, a machine language that every modern browser
+runs at nearly native speed. The page (`web/browsered.js`) paints the grid
+of cells on a canvas and sends each key back as the bytes a terminal would
+send, so the core cannot tell a browser from a terminal.
+
+The Scheme scripts and femtoscheme's own image are packed into the same
+file, which is why `Browsered.html` is all you need.
+
+## Keys
+
+File prompts prefill an editable folder, initially `~/`. The last accepted
+folder is remembered across prompts and reloads. Append a filename, erase
+the prefix with Backspace, or use C-u to clear it and enter another path.
+TAB completion remains available.
+
+The keys are Schememax's. Notation: **C-x** means Ctrl-x; **M-x** means
+Alt-x (Option-x on a Mac), or Esc followed by x.
+
+The keys used most:
+
+| Keys | What they do |
 |---|---|
-| Alt+: (M-:) | Evaluate an expression; the value appears in the status line |
-| Ctrl+X Ctrl+E | Evaluate the expression before the cursor and insert its value after it: `(* 3 4 5)` becomes `(* 3 4 5) 60` |
-| Alt+X (M-x) | Run a command by name; Tab completes, ↑/↓ recall history |
-| Ctrl+H E | Messages: output, results and errors |
+| C-h, F1 | the page of every key (i or [CLOSE] closes it) |
+| C-x C-f | open a file (TAB completes the name) |
+| C-x C-s | save |
+| C-x C-w | save as |
+| C-x b | switch to another buffer |
+| C-x d | list a folder |
+| C-SPC, C-w, M-w, C-y | mark, cut, copy, paste |
+| C-/ | undo (C-M-_ redoes) |
+| C-s, C-r | search forward, backward |
+| M-x | run a command by name |
+| C-x C-e | evaluate the Scheme expression before the cursor |
+| C-x C-r | load the scripts again after editing them |
+| C-c r, C-c g | ask Claude, ask ChatGPT |
+| C-x C-c | end the editor |
 
-M-x `eval-and-replace` replaces the expression by its value instead, and
-M-x `eval-last-sexp-show` only shows it. M-x `eval-buffer` evaluates the
-whole document and `eval-region` the selection. `init.scm` (next to Browsered.app) is loaded when the editor opens;
-change it and run M-x `load-init-file`. It has examples:
+The mode line is a menu: click [SAVE], [UNDO], [Select], [MORE] and the
+rest. The mouse moves the cursor, a drag selects, and the wheel scrolls.
+
+On a Mac the usual Cmd keys also work: Cmd-C copies, Cmd-X cuts, Cmd-V
+pastes, Cmd-Z undoes (Shift-Cmd-Z redoes) and Cmd-S saves. Cmd-+ and Cmd--
+(Ctrl-+ and Ctrl-- elsewhere) change the size of the letters. Kills and
+copies go to the system clipboard, and pasting from other programs works
+with Cmd-V or Ctrl-V.
+
+Accents and the tilde typed with dead keys (a Brazilian keyboard, US
+International, Option-n on a Mac) arrive composed, as in any other text
+field. Since Option is Meta, Option combinations do not type characters;
+put `(set! *option-is-meta* #f)` in your init file if you want them back
+(see [Settings and scripts](#settings-and-scripts)).
+
+## Files and folders
+
+The editor sees an ordinary file system, as on a computer, but the browser
+keeps it. It has two kinds of place.
+
+**HOME** (`~`, which is `/home/web_user`) is kept by the browser itself,
+in its own storage for this page. A file saved there (C-x C-w
+`~/notes.md`) is there the next time you open Browsered, in this browser
+on this computer. Your settings live there too, in `~/.schememax/`.
+
+**The folders of your computer.** A web page may not read your disk by
+itself: it sees only folders you hand it, and the browser asks you to
+hand them over only right after a key press or a click. Browsered asks at
+the moment a folder is needed:
+
+1. Type the path as on your computer: `C-x C-f ~/csand/brow`, then TAB.
+2. The first time, choose the csand folder. Chrome/Edge show a folder
+   picker; Safari/Firefox ask for its path, such as `~/csand`, and access
+   it through the local helper. TAB then completes normally.
+3. Open, edit and save. Folders are writable by default; only an explicit
+   Save writes your changes back to the computer. For debugging, M-x
+   forbid-saving protects the current folder (or individually opened file)
+   until the page is closed. M-x allow-saving restores writing.
+   The browser may still request its own filesystem permission.
+
+Each folder is asked for once. The browser remembers the folders you gave;
+after it restarts it may ask again, with a single click, the first time
+the folder is needed. Folders are read a level at a time, as you go into
+them, so even a large tree opens at once. Folders whose names begin with a
+dot (`.git`) and `node_modules` are not listed.
+
+C-c o (M-x open-folder) gives a folder right away and lists it. Only
+Chrome and Edge use their folder picker; Safari and Firefox ask for the
+folder path through the local helper. The helper must be running.
+
+**Single files**, without a folder: drop a file on the window, or M-x
+open-computer-file. It is copied into HOME and opened. M-x download-file
+saves the buffer and downloads its file.
+
+## Settings and scripts
+
+Your settings go where Schememax keeps them, in HOME:
+
+| File | Loaded |
+|---|---|
+| `~/.schememax/init.scm` | last, at start-up |
+| `~/.schememax/languages/*.scm` | your own languages |
+| `~/.schememax/extensions/*.scm` | your own commands and keys |
+
+For example, in `~/.schememax/init.scm`:
 
 ```scheme
-(define-command (duplicate-line)
-  (let ((line (current-line)))
-    (end-of-line)
-    (insert "\n" line)))
-(global-set-key "C-c d" 'duplicate-line)
+(global-set-key "C-c d" 'insert-day)       ; Emacs key notation
+(set-color 'comment 244)                   ; a face, 0-255 or "#rrggbb"
+(set! *fill-column* 78)
+(set! *gui-theme* 'light)                  ; or M-x light-theme
+(set! *option-is-meta* #f)                 ; Mac: Option types accents
 ```
 
-The editing API follows Emacs Lisp. Positions count characters from 1, so
-`(point-min)` is 1, and an emoji counts as one character.
+Open it with C-x C-f `~/.schememax/init.scm`, edit, save, and press C-x
+C-r: the scripts load again, with no rebuild and no reload of the page.
 
-- Point and text: `point`, `point-min`, `point-max`, `goto-char`,
-  `forward-char`, `backward-char`, `insert`, `delete-region`, `delete-char`,
-  `buffer-substring`, `buffer-string`, `char-after`, `char-before`,
-  `erase-buffer`, `bobp`, `eobp`.
-- Lines: `beginning-of-line`, `end-of-line`, `line-beginning-position`,
-  `line-end-position`, `forward-line`, `goto-line`, `line-number-at-pos`,
-  `current-line`.
-- Mark and region: `mark`, `set-mark`, `region-beginning`, `region-end`,
-  `region-text`, `use-region-p`, `deactivate-mark`, `save-excursion`.
-- Searching: `search-forward`, `search-backward`, `re-search-forward`,
-  `re-search-backward`, `looking-at`, `string-match`, `match-beginning`,
-  `match-end`, `match-string`, `replace-match`, `replace-string`,
-  `replace-regexp`, `regexp-replace`. Regular expressions use JavaScript
-  syntax, with flags such as `"i"` and `"m"`; in a Scheme string the
-  backslash is doubled: `(re-search-forward "\\d+")`.
-- Interaction: `message` and `format` (`~a ~s ~%`, also `%s %d`),
-  `read-from-minibuffer`, `read-number`, `y-or-n-p`.
-- Commands and keys: `define-command`, `global-set-key`, `global-unset-key`,
-  `key-binding`, `execute-command`, `command-names`. Keys use Emacs
-  notation: `C-` Ctrl, `M-` Alt, `s-` Command, `S-` Shift, and names such as
-  `RET`, `TAB`, `SPC`, `<f5>`; sequences are written `"C-c d"`.
-- Also: `kill-new`, `current-kill`, `kill-region`, `undo`, `find-file`,
-  `save-buffer`, `write-file`, `buffer-file-name`, `eval-string`.
+The editor's own scripts are inside `Browsered.html`. To change them for
+everybody, change them in Schememax and bring them over (see
+[Staying close to Schememax](#staying-close-to-schememax)).
 
-A Scheme command edits the document as one change, so one Ctrl+/ undoes it.
-Scripts run only in the Browsered editor page, not through the extension.
+## Assistants
 
-## Windows
+**C-c g uses your Codex allowance.** On macOS or Linux, run
+`./Browsered.command` from this folder (on Mac, double-click it). It builds
+the optional bridge with the C compiler on first launch and opens
+`http://127.0.0.1:8767/`. Keep its terminal running. Alternatively use
+`make run`. Sign into the installed Codex CLI with ChatGPT (`codex login`)
+if needed. `BROWSERED_CODEX` can specify another Codex executable.
 
-`Browsered-Setup-<version>.exe`, from the repository's Releases page,
-installs Browsered for the current user (no administrator rights) with
-Start menu entries: **Browsered**, **Quit Browsered** and **Browsered init
-file**. Like Browsered.app, it runs a small helper on 127.0.0.1 that opens
-the editor in the default browser and runs Claude Code (`claude`) and Codex
-(`codex`) for the request box, using your subscriptions; install and log in
-to them first. Requested PDFs open as a page to save with "Save as PDF".
-The init file is `%APPDATA%\Browsered\init.scm`; upgrades and uninstalling
-leave it in place. A portable zip contains the same files.
+The bridge checks for ChatGPT sign-in, removes inherited API credentials,
+and runs `codex exec` in a private temporary workspace, read-only and
+ephemeral. Prompts and rendered PDF pages go to Codex; the login credentials
+stay in the CLI. Only the bridge's own local page can submit requests.
+There is no OpenAI API fallback, including when an old API key is saved.
+`M-x codex-status` explains the connection. Closing Browsered's editor does
+not stop the launcher; Ctrl-C in its terminal stops it.
 
-The installer is not signed yet: Windows SmartScreen says "Windows protected
-your PC"; choose **More info**, then **Run anyway**.
+The local page has its own browser storage, separate from an HTML file
+opened directly. Open your computer folders again as needed. Files stored
+only in the old page's HOME can be downloaded there and opened in the local
+page; changing launch modes does not delete them.
 
-To publish a release, push a tag: `git tag v0.1.0 && git push origin v0.1.0`.
-The **Windows installer** workflow builds `browsered.exe` with mingw-w64
-(`windows/browsered-win.c`), packs it with Inno Setup
-(`windows/browsered.iss`) and attaches both files to the release.
+**C-c r still uses Anthropic's API.** Configure it with
+`M-x set-claude-key`, paste the key into the masked field, then press Enter
+or **Save key**. Escape or **Cancel** preserves the previous key. The key
+is stored in this browser and sent only to Anthropic.
 
-## Use it in Edge or Chrome (Windows, Linux, ChromeOS)
+Hints, questions, discussions, C-c y and C-c t work as in Schememax.
 
-The editor also runs as a web page, with nothing to install: femtoscheme is
-WebAssembly inside the page. GitHub Pages publishes it from this repository
-(`.github/workflows/pages.yml`) at `https://<user>.github.io/browsered/`.
-In Edge, choose **Apps > Install Browsered** (or the install icon in the
-address bar) to get its own window, a Start menu entry and offline use.
+## Grammarly and writing mode
 
-Without Browsered.app, the Claude and ChatGPT buttons (Ctrl+H R, Ctrl+H G)
-open the same request box, but the page sends the request straight to the
-Anthropic or OpenAI API with your own API key, entered once in the box and
-kept only in that browser. API use is billed by the provider, separately
-from a Claude or ChatGPT subscription; the subscriptions (through Claude Code
-and Codex) are used only by Browsered.app. Requested PDFs open as a page
-to save with the print dialog's "Save as PDF". Open and Save use Edge's file dialogs. The
-init file lives in the browser: M-x `choose-init-file` loads one from disk,
-M-x `use-buffer-as-init` makes the text you are editing the init file, and
-M-x `forget-init-file` returns to the example `init.scm`.
+The optional Writing / Grammarly field is a visible, spellchecked textarea, like the
+earlier Browsered. Grammarly appears automatically when its extension is
+installed and enabled for this page. Corrections are part of the document
+and Save saves them.
 
-On Windows, browsers keep a few Ctrl shortcuts for themselves in a tab
-(Ctrl+N, Ctrl+T, Ctrl+W); the installed app window may pass more of them to
-the editor.
+Open chooses a file. Save writes it without a separate Browsered permission
+prompt, unless you explicitly enabled protection. ChatGPT opens a request field and shows
+the Codex reply below your document without replacing it. Quit asks before
+discarding unsaved changes.
 
-To build the site locally: `sbcl --script build-standalone.lisp`, then
-`web/build-site.sh site`.
+**Advanced editor** keeps the canvas-based Scheme/Emacs interface. Its
+**Writing / Grammarly** button returns to document editing. The canvas
+itself is not a text field and cannot show Grammarly's inline checking.
+The canvas is the default startup view; `?advanced` remains compatible.
+`M-x writing-mode` remains an optional temporary draft view, with Apply
+and Cancel; `M-x document-editor` opens the Grammarly-compatible document interface.
 
-## Install the optional extension
+## Textify a PDF (C-c f) and plots (C-c p)
 
-In Chrome, open `chrome://extensions`, enable Developer mode, choose
-**Load unpacked**, and select this folder. Pin **Browsered — Emacs keys**
-from the Extensions menu. Open your plain text editor and click Browsered.
-It asks only for `activeTab` and `scripting`: access to a page you enable.
+**C-c f** works as in Schememax: choose ChatGPT or Claude, the PDF and the
+pages. Schememax renders the pages with macOS's Quartz; Browsered renders
+them in the page with pdf.js (Mozilla's PDF renderer, bundled in
+`Browsered.html`), at the same 144 dpi, and sends them as images through
+the chosen assistant: Codex uses the local subscription bridge, while Claude
+uses its configured API key. The Markdown opens in
+a new buffer, with every table as an S-expression, as in Schememax.
 
-## Bindings
+**C-c p** on an `(estimator-plot ...)` or `(data-table ...)` opens
+irene-dixe's window over the editor: the same program as Schememax's
+(`src/irene-dixe.c`), compiled to WebAssembly, drawing with the page's
+fonts. In it, s saves the picture beside your file (`paper-plot-1.png`), q
+or Esc closes it; M-x plot-save saves without a window.
 
-| Keys | Action |
+## What the browser does not allow
+
+- **The shell** (Esc ! or M-!, then C-c s): the local launcher runs commands
+  through `/bin/sh`, in the current file's folder. Keep Browsered.command
+  running. Standalone HTML cannot run a shell. Browser folders under `~/`
+  map to the same paths under your computer's home folder.
+- **Ctrl-W, Ctrl-T and Ctrl-N** belong to Chrome and Edge on Windows and
+  Linux, which do not pass them to a page. There, to kill the region,
+  click [DELETE] on the mode line (it appears when text is selected) or
+  use M-x kill-region. On a Mac they are free, since the browser uses Cmd.
+- **Closing the tab.** A page may not close a tab you opened. After C-x
+  C-c shows a closed screen: close the tab with Cmd-W or Ctrl-W,
+  or click **Restart Browsered** to explicitly start another session.
+
+## When something goes wrong
+
+- **A red banner** at the top reports an error of the page. Its text says
+  what failed.
+- **Nothing appears** after 15 seconds: a banner says so. Open
+  `Browsered.html?reset` (add `?reset` at the end of the address). It
+  starts without what the browser kept (the files in HOME and the folders
+  given), and the page loads clean.
+- **A file changed on your computer** while it was open in Browsered is
+  not reread: open it again (C-x C-v).
+- **A folder was refused** in the dialog: Browsered does not ask for it
+  again until the page is reloaded.
+
+## Building and testing (development only)
+
+Users need nothing but a browser. Developers need Emscripten (which
+compiles C to WebAssembly), cc and make:
+
+```
+make             # Browsered.html (macOS: brew install emscripten)
+make check       # femtoscheme's suites and the editor's 231 tests
+make check-web   # the page in a headless Chrome (node and playwright)
+make sync
+make clean
+```
+
+`make` without Emscripten only says that `Browsered.html` is built
+already. `make check` compiles the same core for a terminal
+(`browsered-term`, with cc and curses) and runs Schememax's tests on it,
+with Browsered's own script loaded. `make check-web` opens the page in a
+headless Chrome and checks start-up, Scheme, dead keys, HOME across a
+reload, folders (with a pretend folder dialog), saving back, the API (with
+a pretend answer) and the help page.
+
+After a change, run all three and keep the rebuilt `Browsered.html` with
+the sources: it is what users open.
+
+## Layout
+
+| Path | Contents |
 |---|---|
-| Ctrl+A / E | Start / end of logical line |
-| Ctrl+B / F | Previous / next character |
-| Ctrl+P / N | Previous / next logical line, retaining column |
-| Alt+B / F | Previous / next word |
-| Alt+< / > | Start / end of text |
-| Ctrl+Space or Ctrl+@ | Set mark; movement then extends the selection |
-| Ctrl+X Ctrl+X | Exchange cursor and mark |
-| Ctrl+X H | Select the whole document |
-| Ctrl+G | Cancel mark or search |
-| Ctrl+K | Kill to line end; at line end, kill newline |
-| Ctrl+W / Alt+W | Kill (cut) / copy selection |
-| Alt+D / Alt+Backspace | Kill next / previous word |
-| Ctrl+Y | Yank (paste) |
-| Ctrl+D / Backspace | Delete next / previous character, or the selection |
-| Ctrl+S / Ctrl+R | Incremental search forward / backward |
-| Ctrl+X Ctrl+F | Open file |
-| Ctrl+X Ctrl+S / Ctrl+X Ctrl+W | Save / save to a new file |
-| Ctrl+H | Open / close help |
-| Ctrl+H R / G / K | Claude / ChatGPT / keybindings |
-| Esc (in help) | Close help |
-| Ctrl+/, Ctrl+_ or Ctrl+X U | Browser undo |
-| Ctrl+L | Center current logical line |
+| `Browsered.html` | The editor, built: what users open |
+| `src/` | Schememax's C sources, plus the browser's: `web.c` (the screen layer), `web-main.c` (start and end), `web-scheme.c` (`web-call`, Scheme's door to the page, and the browser's ttfy-request, assistant-request, run-program, spawn-program), `web-sdl.c` and `web-irene-main.c` (irene-dixe on a canvas) |
+| `web/sdl/` | The part of SDL2 and SDL_ttf that irene-dixe uses, for `web-sdl.c` |
+| `web/irene-dixe-pre.js` | irene-dixe's window, pictures and events in the page |
+| `web/vendor/` | pdf.js 3.11.174 (Apache 2.0 licence, `pdfjs-LICENSE`) |
+| `web/shell.html` | The page around the program: the canvas, the hidden text field that receives typing, the banner |
+| `web/browsered.js` | The page's side: painting, keys, mouse, clipboard, HOME, folders, the APIs, the banners |
+| `femtoscheme/` | The bundled Scheme |
+| `scheme/` | Schememax's scripts, plus `extensions/web.scm` (Browsered's commands, its start-up page, the assistants through the APIs, folders asked for by TAB) |
+| `ttfy/` | Schememax's TTFY guidelines |
+| `tests/` | Schememax's tests, and `web-test.js` for the page |
+| `tools/sync-schememax.sh` | `make sync` |
+| `tools/schememax-base/` | Schememax's versions of the three files Browsered changes |
 
-Kills and copies also go to the system clipboard, so other programs can
-paste them. Ctrl+Y pastes text copied in another program when it is newer
-than the last kill; Chrome asks once for permission to read the clipboard,
-and refusing keeps Ctrl+Y on the internal kill buffer.
+## Staying close to Schememax
 
-Incremental search follows Emacs: type to extend the query, Ctrl+S / Ctrl+R
-for the next / previous match (again after a failure to wrap around),
-Backspace to shorten it, Enter or any other command to stop there, and
-Ctrl+G to return to where the search began. A lowercase query ignores case.
-An empty Ctrl+S repeats the last search.
+Browsered is meant to stay Schememax. Change the editor in Schememax,
+then bring the change here:
 
-Successive kills concatenate. Typing, clicking, or another command ends
-the sequence. Shift with movement extends the selection. Command shortcuts
-and normal typing stay with the browser. On a Kinesis, use its Alt key for
-Alt bindings. Ctrl+Space may conflict with macOS input-source switching;
-Shift with movement provides another way to select text.
+```
+make sync
+make && make check && make check-web
+```
 
-Browsered.app serves the editor on this computer using a small native C
-program. CPS-100 checks this local web page. Browsered.html also opens directly
-for offline editing. The optional extension adds bindings to an online editor.
+Only three of Schememax's files carry a few lines for the browser:
 
-For development, `./build-native.sh` rebuilds the app using the installed
-macOS C compiler and SBCL. With Emscripten (`brew install emscripten`) it
-also rebuilds femtoscheme's WebAssembly; otherwise it uses the prebuilt
-`femtoscheme/wasm/femtoscheme.js`. Sources have no third-party libraries.
-`browsered.c` implements the launcher and serves only listed assets on
-127.0.0.1. Text stays in Chrome; the helper receives the document only when
-you send a request to Claude or ChatGPT.
+| File | Why |
+|---|---|
+| `src/native.c` | registers `web-call` |
+| `src/primitives.c` | file times as big numbers: WebAssembly is 32-bit, and today's times overflow femtoscheme's small integers |
+| `femtoscheme/llt/dirpath.c` | where the page keeps femtoscheme's files |
 
-## Check
+`make sync` copies everything else and leaves these three alone. When
+Schememax changes one of them, it says so, and the browser's lines are
+carried over by hand (`tools/schememax-base/` holds the version they were
+added to).
 
-Open `http://127.0.0.1:8766/browser-tests.html` for the checks of navigation and edits,
-input events, undo, help, focus, toggling and Scheme scripting. Browser edits use Chromium's `execCommand` to retain
-native undo; a range replacement fallback sends input events to the page.
-The fallback cannot preserve native undo in browsers without that command.
-The native helper serves local assets. No document collection or third-party libraries.
+## Notice
+
+**English.** This is not a product and must be used only to test the
+software, Claude Code, Codex, OpenEvidence and the algorithms. Anyone who
+wishes to develop the product for sale, distribution or their own use is
+free to do so.
+
+**Português (original).** Isto não é um produto e deve ser usado apenas
+para testar o software, Claude Code, Codex, OpenEvidence e os algoritmos.
+Se alguém quiser desenvolver o produto para venda, distribuição ou uso
+próprio, sinta-se à vontade para fazê-lo.
+
+femtoscheme derives from femtolisp by Jeff Bezanson (BSD licence,
+`femtoscheme/LICENSE`); the editor core from Femto Emacs by Hugh Barney
+(public domain).

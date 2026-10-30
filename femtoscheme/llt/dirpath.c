@@ -60,7 +60,15 @@ void path_to_dirname(char *path)
     }
 }
 
-#ifdef LINUX
+#if defined(__EMSCRIPTEN__)
+/* in a page, the editor's files are in the root of its file system */
+char *get_exename(char *buf, size_t size)
+{
+    if (size < 11) return NULL;
+    strcpy(buf, "/browsered");
+    return buf;
+}
+#elif defined(LINUX)
 char *get_exename(char *buf, size_t size)
 {
     char linkname[64]; /* /proc/<pid>/exe */

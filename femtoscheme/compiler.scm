@@ -471,7 +471,9 @@
 	   (for      (compile-for   g env (cadr x) (caddr x) (cadddr x)))
 	   (return   (compile-in g env #t (cadr x))
 		     (emit g 'ret))
-	   (set!     (compile-in g env #f (caddr x))
+	   (set!     (if (keyword? (cadr x))
+			 (error "compile error: cannot assign to keyword " (cadr x)))
+		     (compile-in g env #f (caddr x))
 		     (compile-sym g env (cadr x) #(seta setc setg)))
 	   (define   (compile-in g env tail?
 				 (expand-define x)))
@@ -517,7 +519,12 @@
 
 (define (lambda-vars l)
   (define (check-formals l o opt kw)
-    (cond ((or (null? l) (symbol? l)) #t)
+    (cond ((null? l) #t)
+	  ((keyword? l)
+	   (error "compile error: keyword " l " cannot be a variable in list " o))
+	  ((symbol? l) #t)
+	  ((and (pair? l) (keyword? (car l)))
+	   (error "compile error: keyword " (car l) " cannot be a variable in list " o))
 	  ((and (pair? l) (symbol? (car l)))
 	   (if (or opt kw)
 	       (error "compile error: invalid argument list "

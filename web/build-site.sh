@@ -1,12 +1,10 @@
 #!/bin/sh
-# Assemble the hosted editor (GitHub Pages) in the given directory.
-# Browsered.html must be current: sbcl --script build-standalone.lisp
+# Stage only public web assets, never the helper, credentials or source tree.
 set -eu
 cd "$(dirname "$0")/.."
-SITE=${1:-site}
-rm -rf "$SITE"
-mkdir -p "$SITE/icons"
-cp Browsered.html "$SITE/index.html"
-cp web/manifest.webmanifest web/sw.js init.scm "$SITE/"
-cp web/icons/*.png "$SITE/icons/"
-printf 'Assembled %s\n' "$SITE"
+site_dir=${1:-site}
+mkdir -p "$site_dir"
+cp Browsered.html "$site_dir/index.html"
+cp Browsered.html "$site_dir/Browsered.html"
+: > "$site_dir/.nojekyll"
+printf 'Browsered site assembled in %s\n' "$site_dir"

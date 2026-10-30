@@ -1,40 +1,41 @@
-# Publish the editor to GitHub Pages on every push to main.
-# Repository settings > Pages > Source: "GitHub Actions".
-name: Publish Browsered
-
+name: Test and publish Browsered
 on:
   push:
     branches: [main]
   workflow_dispatch:
-
 permissions:
   contents: read
   pages: write
   id-token: write
-
 concurrency:
   group: pages
   cancel-in-progress: true
-
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      NODE_PATH: /tmp/browsered-ci/node_modules
     steps:
       - uses: actions/checkout@v4
-      - name: Test femtoscheme
-        run: make -C femtoscheme
-      - name: Build the standalone page
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install build and test tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y sbcl
-          sbcl --script build-standalone.lisp
-      - name: Assemble the site
-        run: web/build-site.sh site
+          sudo apt-get install -y emscripten libncurses-dev
+          npm install --prefix /tmp/browsered-ci playwright@1.62.1
+          /tmp/browsered-ci/node_modules/.bin/playwright install --with-deps chromium
+      - name: Build and test the editor
+        run: make all check check-web check-codex-bridge
+      - name: Assemble and test the hosted site
+        run: |
+          sh web/build-site.sh site
+          node tests/hosted-test.js
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
-
   deploy:
     needs: build
     runs-on: ubuntu-latest

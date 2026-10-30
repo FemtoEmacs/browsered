@@ -311,22 +311,22 @@
   largc lvargc vargc argc compile-in ret values #fn(function) encode-byte-code
   bcode:code const-to-idx-vec)) filter keyword-arg?))
   #fn(length))) #fn(length))) make-code-emitter lastcdr lambda-vars filter #.pair?
-  lambda))) #7=#(#:g721 ()))
+  lambda))) #7=#(#:g729 ()))
 	       compile-for #fn(":000r5e0g4316X0e1|}^g2342e1|}^g3342e1|}^g4342e2|c342;e4c541;" #(1arg-lambda?
   compile-in emit for error "for: third form must be a 1-argument lambda") compile-for)
 	       compile-if #fn("<000r4c0qe1|31e1|31g3\204e2g331e3g331F6;0e4g331560e53045;" #(#fn(";000r5g2]\202>0e0~\177i02g344;g2^\202>0e0~\177i02g444;e0~\177^g2342e1~c2|332e0~\177i02g3342i026<0e1~c3325:0e1~c4}332e5~|322e0~\177i02g4342e5~}42;" #(compile-in
   emit brf ret jmp mark-label)) make-label caddr cdddr cadddr void) compile-if)
 	       compile-in #fn(";000r4g3C6=0e0|}g3c144;g3?6\2570g3`\202:0e2|c342;g3a\202:0e2|c442;g3]\202:0e2|c542;g3^\202:0e2|c642;g3_\202:0e2|c742;e8g3316<0e2|c9g343;c:g3316C0e;|}g2c<c=31L144;e2|c>g343;g3MC@17D02g3ME17;02e?g3M}326=0e@|}g2g344;cAqg3M41;" #(compile-sym
   #(loada loadc loadg) emit load0 load1 loadt loadf loadnil fits-i8 loadi8 #fn(eof-object?)
-  compile-in #fn(top-level-value) eof-object loadv in-env? compile-app #fn("<000r1|c0\202W0e1i03\204316@0e2~\177i02i03\20444;e3~c4i03\20443;|c5\202?0e6~\177i02i0344;|c7\202@0e8~\177i02i03N44;|c9\202<0e:~\177i0343;|c;\202=0e<c=qc>q42;|c?\202@0e@~\177i02i03N44;|cA\202@0eB~\177i02i03N44;|cC\202G0eD~\177i03\204c7eEi0331K44;|cF\202K0eG~\177i03\204eHi0331eIi033145;|cJ\202F0e2~\177]i03\204342e3~cK42;|cL\202N0e2~\177^eHi0331342eM~\177i03\204cN44;|cO\202C0e2~\177i02ePi033144;|cQ\202s0e2~\177^c;_i03\204L3342eReHi033131660^580eScT312e2~\177^eHi0331342e3~cQ42;eU~\177i02i0344;" #(quote
+  compile-in #fn(top-level-value) eof-object loadv in-env? compile-app #fn("=000r1|c0\202W0e1i03\204316@0e2~\177i02i03\20444;e3~c4i03\20443;|c5\202?0e6~\177i02i0344;|c7\202@0e8~\177i02i03N44;|c9\202<0e:~\177i0343;|c;\202=0e<c=qc>q42;|c?\202@0e@~\177i02i03N44;|cA\202@0eB~\177i02i03N44;|cC\202G0eD~\177i03\204c7eEi0331K44;|cF\202K0eG~\177i03\204eHi0331eIi033145;|cJ\202F0e2~\177]i03\204342e3~cK42;|cL\202h0cMi03\204316?0eNcOi03\20432530]2e2~\177^eHi0331342eP~\177i03\204cQ44;|cR\202C0e2~\177i02eSi033144;|cT\202s0e2~\177^c;_i03\204L3342eUeHi033131660^580eNcV312e2~\177^eHi0331342e3~cT42;eW~\177i02i0344;" #(quote
   self-evaluating? compile-in emit loadv if compile-if begin compile-begin
   prog1 compile-prog1 lambda call-with-values #fn("8000r0e0i11i1342;" #(compile-f-))
   #fn("9000r2e0i10c1|332e2i10}322}e3i1131X6<0e0i10c442;];" #(emit loadv
 							     bcode:cdepth nnn
 							     closure)) and
   compile-and or compile-or while compile-while cddr for compile-for caddr
-  cadddr return ret set! compile-sym #(seta setc setg) define expand-define
-  trycatch 1arg-lambda? error "trycatch: second form must be a 1-argument lambda"
+  cadddr return ret set! #fn(keyword?) error "compile error: cannot assign to keyword "
+  compile-sym #(seta setc setg) define expand-define trycatch 1arg-lambda? "trycatch: second form must be a 1-argument lambda"
   compile-app))) compile-in)
 	       compile-or #fn("<000r4e0|}g2g3^c146;" #(compile-short-circuit
 						       brt) compile-or)
@@ -519,10 +519,11 @@
 	       keyword-arg? #fn("7000r1|F16902c0|M41;" #(#fn(keyword?)) keyword-arg?)
 	       lambda-arg-names #fn("9000r1e0c1e2|3142;" #(map! #fn("7000r1|F690e0|M41;|;" #(keyword->symbol))
 							   to-proper) lambda-arg-names)
-	       lambda-vars #fn("7000r1c0q]41;" #(#fn(":000r1c0qm02|~~^^342e1~41;" #(#fn(";000r4|A17502|C640];|F16602|MC6S0g217502g36<0e0c1}c243;~|N}g2g344;|F16602|MF6\2070e3|Mb23216902e4|31C660^5=0e0c5|Mc6}342c7e4|31316<0~|N}g2]44;g36<0e0c1}c843;~|N}]g344;|F6>0e0c9|Mc6}44;|}\202:0e0c1}42;e0c9|c6}44;" #(error
+	       lambda-vars #fn("7000r1c0q]41;" #(#fn(":000r1c0qm02|~~^^342e1~41;" #(#fn(";000r4|\20540];c0|316=0e1c2|c3}44;|C640];|F16902c0|M316>0e1c2|Mc3}44;|F16602|MC6S0g217502g36<0e1c4}c543;~|N}g2g344;|F16602|MF6\2070e6|Mb23216902e7|31C660^5=0e1c8|Mc9}342c0e7|31316<0~|N}g2]44;g36<0e1c4}c:43;~|N}]g344;|F6>0e1c;|Mc9}44;|}\202:0e1c4}42;e1c;|c9}44;" #(#fn(keyword?)
+  error "compile error: keyword " " cannot be a variable in list "
   "compile error: invalid argument list "
   ". optional arguments must come after required." length= caar "compile error: invalid optional argument "
-  " in list " #fn(keyword?) ". keyword arguments must come last."
+  " in list " ". keyword arguments must come last."
   "compile error: invalid formal argument ") check-formals) lambda-arg-names))) lambda-vars)
 	       last #fn("7000r1e0|31M;" #(last-pair) last) last-pair
 	       #fn("7000r1|N?640|;e0|N41;" #(last-pair) last-pair) lastcdr #fn("7000r1|?640|;e0|31N;" #(last-pair) lastcdr)
