@@ -143,9 +143,33 @@ static value_t format_time(value_t *a, uint32_t n)
 		return FL_F;
 	}
 	time_t t = (time_t) seconds;
-	if ((int64_t)t != seconds) lerror(ArgError, "format-time: timestamp out of range");
 	struct tm tm;
 	char out[32];
+	if ((int64_t)t != seconds) {
+		/* A 32-bit time_t (Emscripten 3.1.6) ends in January 2038: take
+		 * the local offset at the nearest time it holds, and work out the
+		 * date by hand (days to civil date, as in Howard Hinnant's
+		 * date algorithms). */
+		time_t probe = seconds > 0 ? (time_t) 2147000000 : (time_t) -2147000000;
+		int64_t local, days, rest, z, era, doe, yoe, y, doy, mp, d, m;
+		if (!localtime_r(&probe, &tm)) lerror(ArgError, "format-time: timestamp out of range");
+		local = seconds + ((int64_t) timegm(&tm) - (int64_t) probe);
+		days = local / 86400; rest = local % 86400;
+		if (rest < 0) { rest += 86400; days--; }
+		z = days + 719468;
+		era = (z >= 0 ? z : z - 146096) / 146097;
+		doe = z - era * 146097;
+		yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+		y = yoe + era * 400;
+		doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+		mp = (5 * doy + 2) / 153;
+		d = doy - (153 * mp + 2) / 5 + 1;
+		m = mp < 10 ? mp + 3 : mp - 9;
+		if (m <= 2) y++;
+		snprintf(out, sizeof(out), "%04lld-%02lld-%02lld %02lld:%02lld", (long long) y, (long long) m,
+			 (long long) d, (long long) (rest / 3600), (long long) (rest % 3600 / 60));
+		return bytes_string(out, strlen(out));
+	}
 	if (!localtime_r(&t, &tm) || !strftime(out, sizeof(out), "%Y-%m-%d %H:%M", &tm))
 		lerror(ArgError, "format-time: timestamp out of range");
 	return bytes_string(out, strlen(out));
