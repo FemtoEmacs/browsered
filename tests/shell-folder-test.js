@@ -35,6 +35,13 @@ const assert = require('assert/strict'), path = require('path'), os = require('o
  const output = await scheme('(buffer-substring 0 (buffer-size))');
  assert.ok(output.includes('\\nBROWSERED_SHELL_OK'), 'Shell result must contain command output on its own line');
  assert.ok(!output.includes('exit status 127'));
+ const localResult=await page.evaluate(async()=>JSON.parse(await Module.browsered.call('shell-run',JSON.stringify({command:'printf "full shell" | tr a-z A-Z; exit 7',directory:'~/',timeout:5}))));
+ assert.deepEqual(localResult,['FULL SHELL','',7],'Local launcher must retain real programs, pipes and exit statuses');
+ await page.route('**/shell',route=>route.fulfill({status:503,body:'Local helper unavailable.'}));
+ const unavailable=await page.evaluate(async()=>JSON.parse(await Module.browsered.call('shell-run',JSON.stringify({command:'pwd',directory:'~/',timeout:5}))));
+ assert.deepEqual(unavailable,['Local helper unavailable.','',127],'Do not silently downgrade local shell requests');
+
+
  console.log('all shell and folder tests passed: editable prefix, remembered directory, cancellation, reload, Esc !, output/status, timeout, origin checks');
  } finally {if(browser) await browser.close();child.kill();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

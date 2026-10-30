@@ -28,6 +28,37 @@ const fs=require('fs'),http=require('http'),path=require('path'),assert=require(
   await page.reload();await page.waitForTimeout(2000);
   await keys('Control+x','Control+f');await page.keyboard.type('hosted.txt');await keys('Enter');
   assert.equal(await scheme('(buffer-substring 0 (buffer-size))'),JSON.stringify('Hosted café draft.'));
+  // A granted folder, with lazy nested directories: browsing must never write it.
+  await page.evaluate(()=>{
+    window.shellWrites=0;
+    const file=(name,text)=>({name,kind:'file',getFile:async()=>new File([text],name,{lastModified:1000}),
+      createWritable:async()=>{window.shellWrites++;throw new Error('Interpreter must not write files');}});
+    const dir=(name,items)=>({name,kind:'directory',values:async function*(){yield* items;}});
+    window.showDirectoryPicker=async()=>dir('granted',[file('report.md','Report.'),file('.hidden','Hidden.'),
+      dir('space café',[file('nested.txt','Nested.')])]);
+  });
+  const command=async text=>page.evaluate(async text=>JSON.parse(await Module.browsered.call('shell-run',JSON.stringify({command:'exec 2>&1\n'+text,directory:'/home/web_user'}))),text);
+  assert.equal((await command('pwd'))[0],'~\n');
+  assert.equal((await command('ls ~/granted'))[0],'report.md\nspace café/\n');
+  assert.ok((await command('ls -al ~/granted'))[0].includes('.hidden'));
+  assert.equal((await command('cd "~/granted/space café" && ls'))[0],'~/granted/space café\nnested.txt\n');
+  assert.equal((await command('pwd'))[0],'~/granted/space café\n');
+  assert.equal((await command('cd -'))[0],'~\n');
+  assert.equal((await command('cd ~/granted; pwd'))[0],'~/granted\n~/granted\n');
+  assert.equal((await command('ls "space café"'))[0],'nested.txt\n');
+  assert.equal((await command('cd /missing-browsered-folder && pwd'))[2],1);
+  assert.equal((await command('pwd'))[0],'~/granted\n','Failed cd must keep the current directory');
+  assert.equal((await command('rm report.md'))[2],127);
+  assert.equal((await command('ls | pwd'))[2],2);
+  assert.equal((await command('pwd > report.md'))[2],2);
+  assert.equal((await command('cd "unterminated'))[2],2);
+  assert.equal((await command('ls -R'))[2],1);
+  assert.equal(await page.evaluate(()=>window.shellWrites),0);
+  assert.equal(await page.evaluate(()=>localStorage.getItem('browsered-last-folder')),'~/granted/');
+  // Use the editor's real Esc ! / C-c s flow as well as its request interface.
+  await keys('Escape','!');await page.keyboard.type('pwd');await keys('Control+c','s');await page.waitForTimeout(250);
+  assert.ok((await scheme('(buffer-substring 0 (buffer-size))')).includes('~/granted'));
+  await scheme('(find-file "/home/web_user/hosted.txt")');
   await page.getByRole('button',{name:'Writing / Grammarly',exact:true}).click();
   await page.waitForSelector('#editor');assert.equal(await page.locator('#editor').inputValue(),'Hosted café draft.');
   await page.getByRole('button',{name:'ChatGPT',exact:true}).click();
@@ -39,6 +70,6 @@ const fs=require('fs'),http=require('http'),path=require('path'),assert=require(
   assert.equal((await fetch(base+'Browsered.html')).status,200);
   assert.equal((await fetch(base+'tools/codex-bridge.c')).status,404);
   await page.screenshot({path:'build/hosted-editor.png'});
-  console.log('all hosted-site tests passed: project URL, advanced startup, Unicode editing, saved draft across reload, Grammarly field, local-only Codex, no helper requests');
+  console.log('all hosted-site tests passed: project URL, advanced startup, Unicode editing, saved draft across reload, Grammarly field, browser ls/cd/pwd and quoted paths, no writes, local-only Codex, no helper requests');
  }finally{if(browser)await browser.close();server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

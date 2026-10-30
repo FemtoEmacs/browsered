@@ -148,3 +148,12 @@ textarea editor is preserved in its Git history. GitHub Pages publishes
 the current WebAssembly editor through `.github/workflows/pages.yml`.
 Stage only the public page with `web/build-site.sh`; never publish a
 local helper server or any user's editor storage or credentials.
+
+## Browser command interpreter
+
+Hosted and standalone pages route shell requests to the limited JavaScript
+interpreter (`ls`, `cd`, `pwd`, `help`), using the browser filesystem and
+explicitly granted folders. Keep this read-only at the file-content level.
+The local loopback page must continue to call `/shell` for full `/bin/sh`
+commands, including external programs and pipes. Never silently downgrade
+a failed local shell request to the limited interpreter. Test both routes.

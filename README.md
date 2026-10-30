@@ -33,7 +33,8 @@ Codex CLI through a small local bridge; it does not use OpenAI API credits.
 The hosted editor starts immediately; no installation or account is needed.
 Chrome and Edge can open and save folders through their browser picker.
 Safari can edit uploaded files and download them; direct folder saving,
-shell commands and your Codex subscription require the local launcher.
+the full system shell and your Codex subscription require the local launcher.
+The hosted editor includes `ls`, `cd`, and `pwd` for its browser filesystem.
 
 For the full local version, [download the source](https://github.com/FemtoEmacs/browsered/archive/refs/heads/main.zip)
 or clone this repository, then run `Browsered.command` (macOS/Linux).
@@ -263,10 +264,17 @@ or Esc closes it; M-x plot-save saves without a window.
 
 ## What the browser does not allow
 
-- **The shell** (Esc ! or M-!, then C-c s): the local launcher runs commands
-  through `/bin/sh`, in the current file's folder. Keep Browsered.command
-  running. Standalone HTML cannot run a shell. Browser folders under `~/`
-  map to the same paths under your computer's home folder.
+- **Commands** (Esc ! or M-!, then C-c s): on GitHub Pages or in standalone
+  HTML, a small browser interpreter supports `ls [-ald] [path ...]`,
+  `cd [path|-]`, `pwd`, and `help`. It reads the editor's browser filesystem,
+  including folders you choose in Chrome/Edge. Quotes, `;`, and `&&` work;
+  system programs, pipes, redirection, variables, and glob expansion do not.
+  `cd` keeps its folder across commands and updates the next file prompt.
+  For example: `cd "~/papers/draft notes" && ls -l`.
+  Through Browsered.command, the same interface always uses the full
+  `/bin/sh` on your computer, including pipes and external programs.
+  Browser folders under `~/` map to your computer's home folder. If the
+  local helper stops, it reports that error rather than switching modes.
 - **Ctrl-W, Ctrl-T and Ctrl-N** belong to Chrome and Edge on Windows and
   Linux, which do not pass them to a page. There, to kill the region,
   click [DELETE] on the mode line (it appears when text is selected) or

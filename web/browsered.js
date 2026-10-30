@@ -1135,12 +1135,136 @@ Module.browsered = (function () {
     });
   }
 
+  // Hosted pages can navigate their browser filesystem without executing
+  // system programs. The loopback launcher continues to use /bin/sh.
+  var browserShellDirectory = null, browserShellBase = null, browserShellPrevious = null;
+  function shellWords(source) {
+    var commands = [], words = [], word = "", started = false, quote = null;
+    function finishWord() { if (started) { words.push(word); word = ""; started = false; } }
+    function finishCommand(next) {
+      finishWord();
+      if (!words.length) throw new Error("Expected a command.");
+      commands.push({words:words,next:next}); words = [];
+    }
+    source = source.replace(/^exec 2>&1\r?\n/, "").replace(/\\\r?\n/g, "");
+    for (var i = 0; i < source.length; i++) {
+      var ch = source[i];
+      if (ch === "\\" && quote !== "'") {
+        if (++i >= source.length) throw new Error("Incomplete escape.");
+        word += source[i]; started = true;
+      } else if (quote) {
+        if (ch === quote) quote = null; else word += ch;
+      } else if (ch === "'" || ch === '"') { quote = ch; started = true; }
+      else if (/\s/.test(ch) && ch !== "\n") finishWord();
+      else if (ch === ";" || ch === "\n") {
+        finishWord(); if (words.length) finishCommand(";");
+      } else if (ch === "&" && source[i + 1] === "&") { finishCommand("&&"); i++; }
+      else if ("|&<>$`".indexOf(ch) >= 0) throw new Error("Pipes, redirection and expansion require the local shell.");
+      else { word += ch; started = true; }
+    }
+    if (quote) throw new Error("Unclosed quote.");
+    finishWord();
+    if (words.length) finishCommand(null);
+    else if (commands.length && commands[commands.length - 1].next === "&&") throw new Error("Expected a command after &&.");
+    return commands;
+  }
+  function browserShellPath(name, base) {
+    if (name === "~") name = HOME;
+    else if (name.indexOf("~/") === 0) name = HOME + name.slice(1);
+    if (name.charAt(0) !== "/") name = base + "/" + name;
+    var parts = [];
+    name.split("/").forEach(function (part) {
+      if (part === "..") parts.pop(); else if (part && part !== ".") parts.push(part);
+    });
+    return "/" + parts.join("/");
+  }
+  function shellDisplayPath(path) {
+    return path === HOME ? "~" : path.indexOf(HOME + "/") === 0 ? "~" + path.slice(HOME.length) : path;
+  }
+  async function shellReadDirectory(path) {
+    if (path.indexOf(HOME + "/") === 0) await ensure(path + "/", false);
+    if (unlisted[path]) await listDirectory(unlisted[path], path, []);
+    var stat = FS.stat(path);
+    if (!FS.isDir(stat.mode)) throw new Error(shellDisplayPath(path) + ": not a directory");
+    return FS.readdir(path);
+  }
+  async function browserShell(req) {
+    var base = browserShellPath(req.directory || "/", HOME);
+    if (browserShellDirectory === null || browserShellBase !== base) {
+      browserShellBase = base;
+      browserShellDirectory = browserShellPath(base === "/" ? (FS.cwd() === "/" ? HOME : FS.cwd()) : base, HOME);
+      browserShellPrevious = null;
+    }
+    var commands;
+    try { commands = shellWords(req.command); }
+    catch (e) { return ["Browser shell: " + e.message + "\n", "", 2]; }
+    var output = "", status = 0, run = true;
+    for (var command of commands) {
+      if (run) {
+        var args = command.words.slice(), name = args.shift();
+        try {
+          status = 0;
+          if (name === "help") {
+            output += "Browser commands: ls [-ald] [path ...], cd [path|-], pwd, help.\nQuotes, ; and && are supported. Use Browsered.command for the full system shell.\n";
+          } else if (name === "pwd") {
+            if (args.length) throw new Error("pwd takes no arguments");
+            output += shellDisplayPath(browserShellDirectory) + "\n";
+          } else if (name === "cd") {
+            if (args.length > 1) throw new Error("cd takes one folder");
+            var target = !args.length ? HOME : args[0] === "-" ? browserShellPrevious : browserShellPath(args[0], browserShellDirectory);
+            if (!target) throw new Error("no previous folder");
+            await shellReadDirectory(target);
+            FS.chdir(target);
+            browserShellPrevious = browserShellDirectory; browserShellDirectory = FS.cwd();
+            try { localStorage.setItem("browsered-last-folder", shellDisplayPath(browserShellDirectory).replace(/\/$/,"") + "/"); } catch (_) {}
+            output += shellDisplayPath(browserShellDirectory) + "\n";
+          } else if (name === "ls") {
+            var all = false, long = false, directoryOnly = false, paths = [], options = true;
+            for (var arg of args) {
+              if (options && arg === "--") options = false;
+              else if (options && /^-./.test(arg)) {
+                for (var flag of arg.slice(1)) {
+                  if (flag === "a") all = true;
+                  else if (flag === "l") long = true;
+                  else if (flag === "d") directoryOnly = true;
+                  else throw new Error("unsupported ls option: -" + flag);
+                }
+              } else paths.push(arg);
+            }
+            if (!paths.length) paths.push(".");
+            for (var part of paths) {
+              var path = browserShellPath(part, browserShellDirectory);
+              // List the parent first so granted but lazy files are available.
+              await shellReadDirectory(path.slice(0, path.lastIndexOf("/")) || "/");
+              if (path.indexOf(HOME + "/") === 0) await ensure(path + "/", false);
+              var info = FS.stat(path), entries;
+              if (FS.isDir(info.mode) && !directoryOnly) {
+                entries = (await shellReadDirectory(path)).filter(function (entry) { return all || entry.charAt(0) !== "."; }).sort();
+                if (paths.length > 1) output += shellDisplayPath(path) + ":\n";
+              } else entries = [null];
+              for (var entry of entries) {
+                var file = entry === null ? path : path + "/" + entry;
+                var stat = FS.stat(file), dir = FS.isDir(stat.mode), label = entry === null ? part : entry;
+                output += (long ? (dir ? "d " : "- ") + String(stat.size).padStart(10) + " " : "") + label + (dir ? "/" : "") + "\n";
+              }
+            }
+          } else {
+            status = 127;
+            output += name + ": not a browser command. Type help, or launch Browsered.command for the full system shell.\n";
+          }
+        } catch (e) { status = 1; output += name + ": " + (e.message || String(e)) + "\n"; }
+      }
+      run = command.next !== "&&" || (run && status === 0);
+    }
+    return [output, "", status];
+  }
+
   var calls = {
     "writing-mode": writingMode,
     "shell-run": async function (json) {
       var req = JSON.parse(json);
       if (location.protocol !== "http:" || location.hostname !== "127.0.0.1")
-        return JSON.stringify(["", "Start Browsered.command to run shell commands.", 127]);
+        return JSON.stringify(await browserShell(req));
       var folder = req.directory || "~/";
       if (folder === HOME) folder = "~/";
       else if (folder.indexOf(HOME + "/") === 0) folder = "~/" + folder.slice(HOME.length + 1);
