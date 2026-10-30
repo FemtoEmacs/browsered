@@ -292,7 +292,9 @@ static void files_request(int fd, char *body, size_t length) {
                 if (!strcmp(entry->d_name,".") || !strcmp(entry->d_name,"..")) continue;
                 struct stat info;
                 if (fstatat(dirfd(dir),entry->d_name,&info,0) || (!S_ISDIR(info.st_mode) && !S_ISREG(info.st_mode))) continue;
-                if (!first) fputc(',',f); first = false; file_info(f,entry->d_name,&info);
+                if (!first) fputc(',',f);
+                first = false;
+                file_info(f,entry->d_name,&info);
                 if (ftell(f) > MAX_REPLY) { ok = false; break; }
             }
             fputc(']',f); closedir(dir);
