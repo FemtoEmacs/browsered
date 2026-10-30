@@ -553,6 +553,18 @@ Module.browsered = (function () {
   // browser's folder dialog (allowed right after a key).  True if
   // something changed, so that the TAB or RET may be tried again.
   async function ensure(path, partial) {
+    var mounted = folders.filter(function(f) { return path === f.path || path.indexOf(f.path+"/")===0; })
+      .sort(function(a,b) {return b.path.length-a.path.length;})[0];
+    if (mounted) {
+      var at = mounted.path, changed = false;
+      if (unlisted[at]) {await listDirectory(unlisted[at],at,[]); changed=true;}
+      var parts = path.slice(at.length+1).split("/");
+      for (var k=0; k<parts.length-1; k++) {
+        at += "/"+parts[k];
+        if (unlisted[at]) {await listDirectory(unlisted[at],at,[]);changed=true;}
+      }
+      return changed;
+    }
     if (path.indexOf(HOME + "/") !== 0) return false;
     var parts = path.slice(HOME.length + 1).split("/"), first = parts[0];
     if (!first || first.charAt(0) === "." || refused[first]) return false;
@@ -608,7 +620,7 @@ Module.browsered = (function () {
   // RET on a path the page lacks (the C core found nothing): get it
   function missing(path) {
     if (fetching || syncing || lastKey.seq !== "\r" || Date.now() - lastKey.time > 3000) return;
-    if (typeof path !== "string" || path.indexOf(HOME + "/") !== 0) return;
+    if (typeof path !== "string" || (path.indexOf(HOME + "/") !== 0 && !folderOf(path))) return;
     fetching = true;
     // the C core has opened an empty buffer for the file it did not find:
     // once the folder is there, the file is read into that buffer
@@ -620,8 +632,9 @@ Module.browsered = (function () {
 
   // TAB found nothing for TYPED (~/csa, ~/csand/sub/x)
   async function askFolder(typed) {
-    if (typed.indexOf("~/") !== 0) return null;
-    return (await ensure(HOME + "/" + typed.slice(2), true)) ? "changed" : null;
+    var path = typed.indexOf("~/")===0 ? HOME+typed.slice(1) : typed;
+    if (path.charAt(0)!=="/") return null;
+    return (await ensure(path,true)) ? "changed" : null;
   }
 
   function notice(text) {
@@ -1190,7 +1203,7 @@ Module.browsered = (function () {
   }
   async function browserShell(req) {
     var base = browserShellPath(req.directory || "/", HOME);
-    if (browserShellDirectory === null || browserShellBase !== base) {
+    if (browserShellDirectory === null || (!commandDirectoryExplicit && browserShellBase !== base)) {
       browserShellBase = base;
       browserShellDirectory = browserShellPath(base === "/" ? (FS.cwd() === "/" ? HOME : FS.cwd()) : base, HOME);
       browserShellPrevious = null;
@@ -1216,7 +1229,8 @@ Module.browsered = (function () {
             await shellReadDirectory(target);
             FS.chdir(target);
             browserShellPrevious = browserShellDirectory; browserShellDirectory = FS.cwd();
-            try { localStorage.setItem("browsered-last-folder", shellDisplayPath(browserShellDirectory).replace(/\/$/,"") + "/"); } catch (_) {}
+            commandDirectoryExplicit = true;
+            rememberCommandDirectory(shellDisplayPath(browserShellDirectory));
             output += shellDisplayPath(browserShellDirectory) + "\n";
           } else if (name === "ls") {
             var all = false, long = false, directoryOnly = false, paths = [], options = true;
@@ -1259,13 +1273,98 @@ Module.browsered = (function () {
     return [output, "", status];
   }
 
+  var commandDirectoryExplicit = false, localShellDirectory = null, localShellBase = null;
+  function rememberCommandDirectory(path) {
+    try { localStorage.setItem("browsered-last-folder", path.replace(/\/$/, "") + "/"); } catch (_) {}
+  }
+  function currentCommandDirectory() {
+    return localShellDirectory || browserShellDirectory || (FS.cwd() === "/" ? HOME : FS.cwd());
+  }
+  async function acceptLocalDirectory(path, previous) {
+    var normalized = browserShellPath(path, HOME);
+    if (normalized !== browserShellPath(previous === "/" ? HOME : previous, HOME)) commandDirectoryExplicit = true;
+    localShellDirectory = path === "~" ? "~/" : path;
+    rememberCommandDirectory(path);
+    // Keep native paths usable by file prompts, including paths outside HOME.
+    // Register lazily: cd must not recursively read or import a user's folder.
+    if (normalized !== "/" && normalized !== HOME && !folderOf(normalized + "/")) {
+      var meta = await (await localFileRequest("stat",path)).json();
+      var handle = localHandle(path,meta);
+      mkdirs(normalized); folders.push({path:normalized,handle:handle});
+      unlisted[normalized] = handle; rememberFolder(normalized,handle);
+    }
+    try { FS.chdir(normalized); } catch (_) {}
+  }
+  async function commandCompletions(line) {
+    // Find the current word without splitting quoted or escaped spaces.
+    var start = 0, segment = 0, quote = null, escape = false;
+    for (var i = 0; i < line.length; i++) {
+      var ch = line[i];
+      if (escape) { escape = false; continue; }
+      if (ch === "\\" && quote !== "'") { escape = true; continue; }
+      if (quote) { if (ch === quote) quote = null; continue; }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (/\s/.test(ch)) start = i + 1;
+      else if (ch === ";" || ch === "&") { start = i + 1; segment = start; }
+    }
+    var prefix = line.slice(0,start), raw = line.slice(start), token = "", words;
+    try {
+      words = shellWords(line.slice(segment,start));
+      var parsed = raw ? shellWords(raw + (quote || "")) : [];
+      token = parsed.length ? parsed[0].words[0] : "";
+    } catch (_) { return ""; }
+    if (!words.length) {
+      return ["cd","ls","pwd","help"].filter(function (s) {return s.indexOf(token)===0;})
+        .map(function(s) {return prefix+s;}).join("\n");
+    }
+    var command = words[words.length-1].words[0], directoriesOnly = command === "cd";
+    var slash = token.lastIndexOf("/"), folder = slash < 0 ? "" : token.slice(0,slash+1), stem = token.slice(slash+1);
+    var cwd = currentCommandDirectory(), entries;
+    try {
+      if (location.protocol === "http:" && location.hostname === "127.0.0.1") {
+        if (cwd === HOME) cwd = "~/";
+        else if (cwd.indexOf(HOME + "/") === 0) cwd = "~" + cwd.slice(HOME.length);
+        var path = folder.charAt(0)==="/" || folder.indexOf("~/")===0 ? folder : cwd.replace(/\/$/,"") + "/" + folder;
+        entries = await (await localFileRequest("list",path || "~/")).json();
+      } else {
+        var at = browserShellPath(folder || ".",cwd);
+        entries = (await shellReadDirectory(at)).map(function(name) { return {name:name,kind:FS.isDir(FS.stat(at+"/"+name).mode)?"directory":"file"}; });
+      }
+    } catch (_) { return ""; }
+    return entries.filter(function(entry) {
+      return !/[\r\n]/.test(entry.name) && entry.name!=="." && entry.name!==".." && entry.name.indexOf(stem)===0 &&
+        (stem.charAt(0)==="." || entry.name.charAt(0)!==".") && (!directoriesOnly || entry.kind==="directory");
+    }).sort(function(a,b) {return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;}).map(function(entry) {
+      var value = folder + entry.name + (entry.kind==="directory" ? "/" : "");
+      if (value.indexOf("~/")===0 && (raw.charAt(0)==='"' || raw.charAt(0)==="'" || /[\s'"\\;$&|<>`]/.test(value)))
+        value='~/"'+value.slice(2).replace(/[\\"$`]/g,"\\$&")+'"';
+      else if (raw.charAt(0)==="'" && value.indexOf("'")<0) value="'"+value+"'";
+      else if (raw.charAt(0)==='"' || /[\s'"\\;$&|<>`]/.test(value)) value='"'+value.replace(/[\\"$`]/g,"\\$&")+'"';
+      return prefix+value;
+    }).join("\n");
+  }
+
   var calls = {
     "writing-mode": writingMode,
+    "command-complete": commandCompletions,
+    "command-context": function (directory) {
+      if (!commandDirectoryExplicit) {
+        var base = browserShellPath(directory || "/",HOME);
+        if (base==="/") base=HOME;
+        browserShellDirectory=base;browserShellBase=base;
+        localShellDirectory=base;localShellBase=base;
+      }
+      return "ok";
+    },
     "shell-run": async function (json) {
       var req = JSON.parse(json);
       if (location.protocol !== "http:" || location.hostname !== "127.0.0.1")
         return JSON.stringify(await browserShell(req));
-      var folder = req.directory || "~/";
+      var base = browserShellPath(req.directory || "~/",HOME);
+      if (!localShellDirectory || (!commandDirectoryExplicit && localShellBase !== base)) {
+        localShellDirectory = req.directory || "~/"; localShellBase = base;
+      }
+      var folder = localShellDirectory;
       if (folder === HOME) folder = "~/";
       else if (folder.indexOf(HOME + "/") === 0) folder = "~/" + folder.slice(HOME.length + 1);
       try {
@@ -1273,6 +1372,11 @@ Module.browsered = (function () {
           body: String(Math.min(600, Math.max(1, req.timeout || 60))) + "\n" + folder + "\n" + req.command});
         var text = await response.text();
         if (!response.ok) return JSON.stringify([text, "", 127]);
+        var directory = response.headers.get("X-Browsered-Directory");
+        if (directory) {
+          try { await acceptLocalDirectory(decodeURIComponent(directory),folder); }
+          catch (e) { notice("Command finished, but its folder could not be opened: " + e.message); }
+        }
         var cut = text.indexOf("\n");
         return JSON.stringify([text.slice(cut + 1), "", Number(text.slice(0, cut))]);
       } catch (e) { return JSON.stringify(["", "Local shell unavailable: " + e.message, 127]); }

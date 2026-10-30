@@ -1,7 +1,8 @@
 const {chromium} = require('playwright');
 const {spawn} = require('child_process');
-const assert = require('assert/strict'), path = require('path'), os = require('os');
+const assert = require('assert/strict'), path = require('path'), os = require('os'), fs = require('fs');
 (async () => {
+ const fixture=fs.mkdtempSync(path.join(os.tmpdir(),'browsered-command-'));
  const child = spawn(path.resolve('build/browsered-codex-bridge'), ['--serve','--port','0','--page',path.resolve('Browsered.html')], {env:{...process.env,BROWSERED_CODEX:'/usr/bin/true'}});
  let browser;
  try {
@@ -37,11 +38,28 @@ const assert = require('assert/strict'), path = require('path'), os = require('o
  assert.ok(!output.includes('exit status 127'));
  const localResult=await page.evaluate(async()=>JSON.parse(await Module.browsered.call('shell-run',JSON.stringify({command:'printf "full shell" | tr a-z A-Z; exit 7',directory:'~/',timeout:5}))));
  assert.deepEqual(localResult,['FULL SHELL','',7],'Local launcher must retain real programs, pipes and exit statuses');
+ // Directory changes from the real shell persist into both command interfaces
+ // and the next file prompt, even for native paths outside the virtual HOME.
+ const nativeDir=path.join(fixture,'space café');fs.mkdirSync(nativeDir);
+ fs.writeFileSync(path.join(nativeDir,'native.txt'),'Native source stays intact.');
+ const commandText='cd "'+fixture+'/spa';
+ await keys('Control+c','m');await page.keyboard.type(commandText);await keys('Tab','Enter');await page.waitForTimeout(500);
+ const nativePath=fs.realpathSync(nativeDir);
+ assert.equal(await page.evaluate(()=>localStorage.getItem('browsered-last-folder')),nativePath+'/');
+ await keys('Control+c','m');await page.keyboard.type('ls n');await keys('Tab','Enter');await page.waitForTimeout(400);
+ assert.ok((await scheme('(buffer-substring 0 (buffer-size))')).includes('native.txt'));
+ await keys('Control+c','Control+f');await page.keyboard.type('native.txt');await keys('Enter');await page.waitForTimeout(600);
+ assert.equal(await scheme('(buffer-substring 0 (buffer-size))'),JSON.stringify('Native source stays intact.'));
+ assert.equal(fs.readFileSync(path.join(nativeDir,'native.txt'),'utf8'),'Native source stays intact.');
+ await keys('Escape','!');await page.keyboard.type('cd ..');await keys('Control+c','s');await page.waitForTimeout(400);
+ assert.equal(await page.evaluate(()=>localStorage.getItem('browsered-last-folder')),fs.realpathSync(fixture)+'/');
+ await keys('Control+c','m');await page.keyboard.type('pwd');await keys('Enter');await page.waitForTimeout(400);
+ assert.ok((await scheme('(buffer-substring 0 (buffer-size))')).includes(fs.realpathSync(fixture)));
  await page.route('**/shell',route=>route.fulfill({status:503,body:'Local helper unavailable.'}));
  const unavailable=await page.evaluate(async()=>JSON.parse(await Module.browsered.call('shell-run',JSON.stringify({command:'pwd',directory:'~/',timeout:5}))));
  assert.deepEqual(unavailable,['Local helper unavailable.','',127],'Do not silently downgrade local shell requests');
 
 
  console.log('all shell and folder tests passed: editable prefix, remembered directory, cancellation, reload, Esc !, output/status, timeout, origin checks');
- } finally {if(browser) await browser.close();child.kill();}
+ } finally {if(browser) await browser.close();child.kill();fs.rmSync(fixture,{recursive:true,force:true});}
 })().catch(e=>{console.error(e);process.exitCode=1;});

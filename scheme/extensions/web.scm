@@ -364,3 +364,23 @@ answer's status and text."
           "irene-dixe did not start")
       (concat program ": a web page cannot run programs")))
 
+
+
+;; Both command interfaces share their working directory and output format.
+(defcommand (minibuffer-command)
+  "C-c m: enter a command in the minibuffer; TAB completes paths."
+  (let* ((file (buffer-filename))
+         (directory (if file (file-name-directory (absolute-path file))
+                        (or *shell-directory* (path.cwd)))))
+    (web-request "command-context" directory)
+    (let ((command ((top-level-value 'web-command-prompt))))
+      (when (and command (not (string=? (trim command) "")))
+        (let-values (((output code) (run-shell command directory)))
+          (show-shell-output command output code))))))
+
+(defcommand (web-find-file)
+  "Open a file, starting in the last command or file directory."
+  (execute-builtin "find-file"))
+(when (in-browser?)
+  (global-set-key "C-c m" 'minibuffer-command)
+  (global-set-key "C-c C-f" 'web-find-file))

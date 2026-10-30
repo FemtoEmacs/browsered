@@ -40,13 +40,16 @@ static bool send_all(int fd, const void *data, size_t n) {
     }
     return true;
 }
-static void reply(int fd, int status, const char *type, const char *data, size_t n) {
+static void reply_extra(int fd, int status, const char *type, const char *data, size_t n, const char *extra) {
     const char *reason = status == 200 ? "OK" : status == 400 ? "Bad Request" :
         status == 403 ? "Forbidden" : status == 404 ? "Not Found" :
         status == 413 ? "Content Too Large" : "Bad Gateway";
-    char header[512];
-    int k = snprintf(header, sizeof(header), "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n", status, reason, type, n);
+    char header[PATH_MAX * 3 + 512];
+    int k = snprintf(header, sizeof(header), "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\n%sConnection: close\r\n\r\n", status, reason, type, n, extra ? extra : "");
     if (k > 0 && (size_t)k < sizeof(header) && send_all(fd, header, (size_t)k)) send_all(fd, data, n);
+}
+static void reply(int fd, int status, const char *type, const char *data, size_t n) {
+    reply_extra(fd,status,type,data,n,NULL);
 }
 static void message(int fd, int status, const char *text) {
     reply(fd, status, "text/plain; charset=utf-8", text, strlen(text));
@@ -184,7 +187,12 @@ static void shell_request(int fd, char *body) {
     if (stat(directory, &info) || !S_ISDIR(info.st_mode)) { message(fd, 400, "Shell starting folder does not exist on this computer."); return; }
     char temp[] = "/tmp/browsered-shell-XXXXXX";
     if (!mkdtemp(temp)) { message(fd, 502, "Cannot create shell workspace."); return; }
-    char output[PATH_MAX]; private_path(output, temp, "output");
+    char output[PATH_MAX], cwd_file[PATH_MAX];
+    private_path(output, temp, "output"); private_path(cwd_file,temp,"cwd");
+    const char *trap = "trap 'pwd -P > \"$BROWSERED_DIRECTORY_FILE\"' EXIT\n";
+    char *script = malloc(strlen(trap) + strlen(cursor) + 1);
+    if (!script) { rmdir(temp); message(fd,502,"Out of memory."); return; }
+    strcpy(script,trap); strcat(script,cursor);
     pid_t child = fork(); int code = -1;
     if (!child) {
         setpgid(0, 0);
@@ -192,7 +200,8 @@ static void shell_request(int fd, char *body) {
         if (in < 0 || out < 0 || chdir(directory)) _exit(126);
         dup2(in, 0); dup2(out, 1); dup2(out, 2); close(in); close(out);
         struct rlimit cap = {MAX_REPLY, MAX_REPLY}; setrlimit(RLIMIT_FSIZE, &cap);
-        execl("/bin/sh", "sh", "-c", cursor, (char *)NULL); _exit(127);
+        setenv("BROWSERED_DIRECTORY_FILE",cwd_file,1);
+        execl("/bin/sh", "sh", "-c", script, (char *)NULL); _exit(127);
     }
     if (child > 0) {
         int status = 0; bool done = false;
@@ -210,9 +219,26 @@ static void shell_request(int fd, char *body) {
     char *result = malloc(size + 48);
     if (result) { int n = snprintf(result, 48, "%d\n", code);
         if (text) memcpy(result + n, text, size);
-        reply(fd, 200, "text/plain; charset=utf-8", result, (size_t)n + size); free(result);
+        char extra[PATH_MAX * 3 + 64] = "";
+        size_t cwd_size = 0; char *cwd = read_file(cwd_file,PATH_MAX-1,&cwd_size);
+        if (cwd && cwd_size) {
+            while (cwd_size && (cwd[cwd_size-1] == '\n' || cwd[cwd_size-1] == '\r')) cwd[--cwd_size] = 0;
+            const char *value = cwd; char abbreviated[PATH_MAX+2];
+            size_t home_len = home ? strlen(home) : 0;
+            if (home_len && !strncmp(cwd,home,home_len) && (!cwd[home_len] || cwd[home_len]=='/')) {
+                snprintf(abbreviated,sizeof(abbreviated),"~%s",cwd+home_len); value=abbreviated;
+            }
+            size_t used = (size_t)snprintf(extra,sizeof(extra),"X-Browsered-Directory: ");
+            for (const unsigned char *c=(const unsigned char *)value; *c && used+5<sizeof(extra); c++) {
+                if (isalnum(*c) || strchr("/~-._",*c)) extra[used++]=(char)*c;
+                else { snprintf(extra+used,sizeof(extra)-used,"%%%02X",*c); used+=3; }
+            }
+            strcpy(extra+used,"\r\n");
+        }
+        free(cwd);
+        reply_extra(fd, 200, "text/plain; charset=utf-8", result, (size_t)n + size,extra); free(result);
     } else message(fd, 502, "Cannot read shell result.");
-    free(text); unlink(output); rmdir(temp);
+    free(script); free(text); unlink(output); unlink(cwd_file); rmdir(temp);
 }
 
 static void json_text(FILE *f, const char *s) {

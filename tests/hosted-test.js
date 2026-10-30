@@ -58,6 +58,18 @@ const fs=require('fs'),http=require('http'),path=require('path'),assert=require(
   // Use the editor's real Esc ! / C-c s flow as well as its request interface.
   await keys('Escape','!');await page.keyboard.type('pwd');await keys('Control+c','s');await page.waitForTimeout(250);
   assert.ok((await scheme('(buffer-substring 0 (buffer-size))')).includes('~/granted'));
+  // cd must override the file's old directory in both file-open bindings.
+  await keys('Control+c','Control+f');await page.keyboard.type('report.md');await keys('Enter');
+  assert.equal(await scheme('(buffer-substring 0 (buffer-size))'),JSON.stringify('Report.'));
+  await keys('Control+c','m');await page.keyboard.type('cd "space');await keys('Tab','Enter');await page.waitForTimeout(200);
+  assert.equal((await command('pwd'))[0],'~/granted/space café\n');
+  await keys('Control+x','Control+f');await page.keyboard.type('nested.txt');await keys('Enter');
+  assert.equal(await scheme('(buffer-substring 0 (buffer-size))'),JSON.stringify('Nested.'));
+  await keys('Control+c','m');await page.keyboard.type('ls n');await keys('Tab','Enter');await page.waitForTimeout(200);
+  assert.ok((await scheme('(buffer-substring 0 (buffer-size))')).includes('nested.txt'));
+  await keys('Control+c','m');await page.keyboard.type('cd ..');await keys('Enter');await page.waitForTimeout(200);
+  await keys('Control+c','m');await page.keyboard.type('cd "space');await keys('Tab','Control+g');
+  assert.equal((await command('pwd'))[0],'~/granted\n','Cancel must not run a completed command');
   await scheme('(find-file "/home/web_user/hosted.txt")');
   await page.getByRole('button',{name:'Writing / Grammarly',exact:true}).click();
   await page.waitForSelector('#editor');assert.equal(await page.locator('#editor').inputValue(),'Hosted café draft.');

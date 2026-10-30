@@ -92,10 +92,50 @@ static value_t web_spawn_program(value_t *a, uint32_t n)
 	return call_scheme("web-spawn-program", a, n);
 }
 
+/* A real minibuffer, with path completion supplied by the browser/helper.
+ * Commands are not passed through filename expansion or a second parser. */
+extern int __real_line_edit(char *, char *, int, int, int (*)(char *, int, int, int));
+static char *command_candidates;
+static int command_cycle = -1;
+static int command_complete(char *buf, int nbuf, int len, int again)
+{
+    if (!again) command_cycle = -1;
+    if (command_cycle < 0) {
+        free(command_candidates);
+        command_candidates = web_host_call("command-complete",buf);
+        if (!command_candidates || !*command_candidates) return len;
+        size_t common = strcspn(command_candidates,"\n"); int count = 1;
+        for (char *p=strchr(command_candidates,'\n'); p && p[1]; p=strchr(p+1,'\n')) {
+            size_t k=0, n=strcspn(p+1,"\n"); count++;
+            while (k<common && k<n && command_candidates[k]==p[1+k]) k++;
+            common=k;
+        }
+        if (count==1 || common>(size_t)len) {
+            size_t n=common<(size_t)(nbuf-1)?common:(size_t)(nbuf-1);
+            memcpy(buf,command_candidates,n); buf[n]=0; return (int)n;
+        }
+        command_cycle=0;
+    }
+    char *p=command_candidates;
+    for (int i=0;i<command_cycle;i++) {p=strchr(p,'\n'); if (!p || !p[1]) {p=command_candidates;command_cycle=-1;break;} p++;}
+    size_t n=strcspn(p,"\n"); if (n>(size_t)(nbuf-1)) n=(size_t)(nbuf-1);
+    memcpy(buf,p,n);buf[n]=0;command_cycle++;return (int)n;
+}
+static value_t web_command_prompt(value_t *a, uint32_t n)
+{
+    (void)a;
+    argcount("web-command-prompt", n, 0);
+    char text[4096] = ""; command_cycle=-1;
+    int accepted = __real_line_edit("Command: ",text,sizeof(text),0,command_complete);
+    free(command_candidates); command_candidates=NULL;
+    if (!accepted) return FL_F;
+    return string_from_cstr(text);
+}
 static builtinspec_t web_builtins[] = {
 	{"run-program", web_run_program},
 	{"spawn-program", web_spawn_program},
 	{"web-call", web_call},
+	{"web-command-prompt", web_command_prompt},
 	{"ttfy-request", web_ttfy_request},
 	{"assistant-request", web_assistant_request},
 	{NULL, NULL}

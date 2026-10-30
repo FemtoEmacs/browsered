@@ -157,3 +157,11 @@ explicitly granted folders. Keep this read-only at the file-content level.
 The local loopback page must continue to call `/shell` for full `/bin/sh`
 commands, including external programs and pipes. Never silently downgrade
 a failed local shell request to the limited interpreter. Test both routes.
+
+C-c m opens the native minibuffer through web-scheme.c's command prompt,
+with asynchronous path completion; Esc ! keeps the multiline command view.
+Both share the current command directory, including full local shell cd
+reported through the helper response header. C-c C-f aliases C-x C-f.
+Do not reset an explicit cd just because the original file is elsewhere.
+Test completion/cancellation and opening a relative filename after cd on
+both hosted and local pages, including native paths outside browser HOME.

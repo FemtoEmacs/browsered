@@ -103,7 +103,7 @@ The keys used most:
 | Keys | What they do |
 |---|---|
 | C-h, F1 | the page of every key (i or [CLOSE] closes it) |
-| C-x C-f | open a file (TAB completes the name) |
+| C-x C-f, C-c C-f | open a file in the current folder (TAB completes the name) |
 | C-x C-s | save |
 | C-x C-w | save as |
 | C-x b | switch to another buffer |
@@ -115,6 +115,7 @@ The keys used most:
 | C-x C-e | evaluate the Scheme expression before the cursor |
 | C-x C-r | load the scripts again after editing them |
 | C-c r, C-c g | ask Claude, ask ChatGPT |
+| C-c m | command in the minibuffer; TAB completes paths, Enter runs it, C-g cancels |
 | C-x C-c | end the editor |
 
 The mode line is a menu: click [SAVE], [UNDO], [Select], [MORE] and the
@@ -269,11 +270,16 @@ or Esc closes it; M-x plot-save saves without a window.
   `cd [path|-]`, `pwd`, and `help`. It reads the editor's browser filesystem,
   including folders you choose in Chrome/Edge. Quotes, `;`, and `&&` work;
   system programs, pipes, redirection, variables, and glob expansion do not.
-  `cd` keeps its folder across commands and updates the next file prompt.
+  `cd` keeps its folder across commands and updates both file-opening
+  bindings, C-x C-f and C-c C-f. Use C-c m for a one-line command with
+  TAB completion (directories for cd, files and directories for ls).
+  Enter runs it and shows its output; C-g cancels. Esc ! retains the
+  multiline command window.
   For example: `cd "~/papers/draft notes" && ls -l`.
   Through Browsered.command, the same interface always uses the full
   `/bin/sh` on your computer, including pipes and external programs.
-  Browser folders under `~/` map to your computer's home folder. If the
+  A successful local cd is remembered for subsequent commands and file
+  prompts too. Browser folders under `~/` map to your computer's home folder. If the
   local helper stops, it reports that error rather than switching modes.
 - **Ctrl-W, Ctrl-T and Ctrl-N** belong to Chrome and Edge on Windows and
   Linux, which do not pass them to a page. There, to kill the region,
