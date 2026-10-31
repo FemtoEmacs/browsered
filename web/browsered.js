@@ -391,7 +391,7 @@ Module.browsered = (function () {
   //
   // The editor sees an ordinary file system (Emscripten's).  HOME,
   // /home/web_user, is kept in the browser (IndexedDB), with
-  // ~/.schememax/init.scm and the files saved there.
+  // ~/.browsered/init.scm and the files saved there.
   //
   // A folder of the computer (C-c o) appears under HOME where the user
   // says, ~/csand say, so paths and completion are those of the computer.
@@ -422,7 +422,7 @@ Module.browsered = (function () {
 
   // A folder directly in HOME whose name does not begin with a dot is a
   // folder of the computer: the editor makes no others (its own settings
-  // are in ~/.schememax, and files dropped or saved in HOME are files).
+  // are in ~/.browsered, and files dropped or saved in HOME are files).
   // Such folders are never kept in the browser's storage.
   function isComputerFolder(path) {
     if (isFolderRoot(path)) return true;
@@ -1958,6 +1958,7 @@ Module.browsered = (function () {
       layer.classList.toggle("shown");
       return layer.classList.contains("shown") ? "shown" : "hidden";
     },
+    "schemer-hot-status": function () { return BrowseredSchemer.hotStatus(); },
     "test-result": function (text) { Module.browsered._test = text; return "ok"; },
     "mkdirs": function (path) { mkdirs(path); return "ok"; },
     // the assistants' APIs: {url, headers, body} -> {status, text}
@@ -2111,6 +2112,8 @@ Module.browsered = (function () {
       return e;
     },
     textLayer: textLayer,
+    // the editor's memory, for compiled hot paths (web/schemer.js)
+    memory: function () { return wasmMemory; },
     home: function () { return HOME; },
     rows: function () { return nRows; },
     cols: function () { return nCols; },
@@ -2150,7 +2153,7 @@ function browseredForget(done) {
 
 // Before HOME is read back: delete from the browser's storage what earlier
 // Browsereds kept of the computer's folders (anything inside a folder
-// directly in HOME, except ~/.schememax and the like).  Only the names
+// directly in HOME, except ~/.browsered and the like).  Only the names
 // are read, never the contents, so even a large old copy goes quickly.
 function browseredPrune(done) {
   var home = "/home/web_user", req;
@@ -2202,6 +2205,9 @@ Module.preRun.push(function () {
   var load = function () {
     FS.syncfs(true, function (err) {
       if (err) console.warn("Browsered: the browser's storage is unavailable", err);
+      // the user's folder was ~/.schememax before it was ~/.browsered (web.scm)
+      try { FS.stat("/home/web_user/.browsered"); }
+      catch (e) { try { FS.rename("/home/web_user/.schememax", "/home/web_user/.browsered"); } catch (e2) { /* none */ } }
       Module.removeRunDependency("home");
       Module.browsered.restoreFolders();
     });

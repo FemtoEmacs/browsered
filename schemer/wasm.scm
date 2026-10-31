@@ -176,6 +176,8 @@
           ((global.get) (list #x23 (uleb (car a))))
           ((global.set) (list #x24 (uleb (car a))))
           ((i32.const) (list #x41 (sleb (car a))))
+          ((i32.load8_u) (list #x2d (uleb (car a)) (uleb (cadr a))))
+          ((i32.store8) (list #x3a (uleb (car a)) (uleb (cadr a))))
           ((i64.const) (list #x42 (sleb (car a))))
           ((f64.const) (list #x44 (f64-bytes (car a))))
           ((ref.null) (list #xd0 (heaptype (car a))))
@@ -238,7 +240,9 @@
   (flatten
    (list #x00 #x61 #x73 #x6d #x01 #x00 #x00 #x00
          (section 1 (list 1 #x4e (vec (map subtype-bytes types))))
-         (section 2 (vec (map (lambda (im) (list (wname (car im)) (wname (cadr im)) #x00 (uleb (caddr im))))
+         (section 2 (vec (map (lambda (im) (if (eq? (caddr im) 'memory)
+                                               (list (wname (car im)) (wname (cadr im)) #x02 #x00 #x00)   ; memory, min 0
+                                               (list (wname (car im)) (wname (cadr im)) #x00 (uleb (caddr im)))))
                               imports)))
          (section 3 (vec (map (lambda (f) (uleb (car f))) funcs)))
          (if (null? *module-tags*) '()

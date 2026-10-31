@@ -136,34 +136,242 @@ again, and Grammarly checks it again."
               (message "Grammarly: checking; [GRAMMAR] again when done."))))
 
 ;;; ------------------------------------------------------------------
-;;; Speed: the busiest Scheme, in C (src/web-fast.c)
+;;; Speed: the busiest Scheme, compiled (src/web-hot.c)
 ;;; ------------------------------------------------------------------
 ;;
-;; At every key the colours of a LaTeX window (up to 16 KB before it too)
-;; and the rows of word-wrapped prose are worked out again.  Interpreted
-;; under Asyncify that took some 130 ms a key in a LaTeX file.  In the
-;; browser the same procedures run in C, byte for byte the same
-;; (tests/fast-test.js compares them); tex.scm and markdown.scm stay the
-;; reference, and M-x scheme-highlighting brings them back.
+;; At every key the colours of the visible text (and up to 16 KB before
+;; it) and the rows of word-wrapped prose are worked out again.
+;; Interpreted under Asyncify that took some 130 ms a key in a LaTeX file.
+;; So the procedure that does it -- the language's highlighter
+;; (latex-highlight of tex.scm ...), markdown-wrap-end -- is compiled by
+;; Schemer from its own source the first time it is used, and from then on
+;; runs as WebAssembly reading the editor's text where it is.  Whatever
+;; procedure is there is compiled: a user's own highlighter (a language
+;; defined in ~/.browsered/languages/, after C-x C-r) is compiled the same
+;; way.  Until the compiled one is ready, or if it cannot be compiled, the
+;; Scheme runs as before.  M-x hot-paths says which are compiled;
+;; M-x scheme-highlighting turns the compiled ones off and on, to compare.
+;;
+;; The program sent to Schemer: the procedure's definition and those of the
+;; procedures it calls (from the scripts' source), the values of the data
+;; it reads (*tex-heading-commands* ...), and femtoscheme's byte-string
+;; procedures (aref, aset!, length, byte-substring, string.find), here for
+;; the editor's memory.
 
-(define *scheme-latex-highlight* latex-highlight)
-(define *scheme-markdown-wrap-end* markdown-wrap-end)
+(define *hot-enabled* #t)
+(define *hot* (table))                 ; procedure -> program number, or 'failed
+(define *hot-source-index* #f)         ; name -> (define (name ...) ...), from the scripts
 
-(define (use-fast-highlighting on)
-  (let ((tex (find-language "TeX")))
-    (when tex (vector-set! tex 12 (if on web-latex-highlight *scheme-latex-highlight*)))
-    (set! markdown-wrap-end (if on web-wrap-end *scheme-markdown-wrap-end*))
-    on))
+(define *hot-renames*
+  '((aref . %hot-aref) (aset! . %hot-aset!) (length . %hot-length)
+    (byte-substring . %hot-byte-substring) (string.find . %hot-string-find)
+    (string-prefix? . %hot-string-prefix?) (string-suffix? . %hot-string-suffix?)))
 
-(when (and (in-browser?) (bound? 'web-latex-highlight))
-  (use-fast-highlighting #t))
+(define *hot-shims* "
+;; the editor's text and colours are addresses in its memory (fixnums):
+;; reading a byte is then the cheapest test there is.  Their lengths are
+;; those of the call (%hot-enter).
+(define %hot-text 0) (define %hot-text-len 0) (define %hot-out 0) (define %hot-out-len 0)
+(define (%hot-enter text len out out-len)
+  (set! %hot-text text) (set! %hot-text-len len) (set! %hot-out out) (set! %hot-out-len out-len))
+(define (%hot-aref x i)
+  (if (fixnum? x) (%mem-u8 (+ x i))
+      (cond ((string? x) (char->integer (string-ref x i)))
+            ((bytevector? x) (bytevector-u8-ref x i))
+            (else (vector-ref x i)))))
+(define (%hot-aset! x i v)
+  (if (fixnum? x) (%mem-u8-set! (+ x i) v)
+      (if (bytevector? x) (bytevector-u8-set! x i v) (vector-set! x i v))))
+(define (%hot-length x)
+  (cond ((fixnum? x) (if (= x %hot-text) %hot-text-len %hot-out-len))
+        ((string? x) (string-length x)) ((vector? x) (vector-length x))
+        ((bytevector? x) (bytevector-length x)) (else (length x))))
+(define (%hot-byte-substring x a . b)
+  (let ((e (if (pair? b) (car b) (%hot-length x))))
+    (if (fixnum? x)
+        (let ((s (make-string (- e a) #\\space)))
+          (do ((i a (+ i 1))) ((= i e) s) (string-set! s (- i a) (integer->char (%mem-u8 (+ x i))))))
+        (substring x a e))))
+(define (%hot-string-find text needle start)
+  (let ((n (%hot-length text)) (m (%hot-length needle)))
+    (let loop ((k start))
+      (cond ((> (+ k m) n) #f)
+            ((let same ((j 0)) (or (= j m) (and (= (%hot-aref text (+ k j)) (%hot-aref needle j)) (same (+ j 1))))) k)
+            (else (loop (+ k 1)))))))
+(define (%hot-same-at? s at part)
+  (let ((m (%hot-length part)))
+    (let loop ((j 0)) (or (= j m) (and (= (%hot-aref s (+ at j)) (%hot-aref part j)) (loop (+ j 1)))))))
+(define (%hot-string-prefix? prefix s)
+  (and (<= (%hot-length prefix) (%hot-length s)) (%hot-same-at? s 0 prefix)))
+(define (%hot-string-suffix? suffix s)
+  (and (<= (%hot-length suffix) (%hot-length s)) (%hot-same-at? s (- (%hot-length s) (%hot-length suffix)) suffix)))
+")
+
+(define (hot-definition name)
+  (unless *hot-source-index*
+    (set! *hot-source-index* (table))
+    (for-each (lambda (path)
+                (guard (e (#t #f))
+                  (let ((port (open-input-file path)))
+                    (let loop ()
+                      (let ((form (read port)))
+                        (unless (eof-object? form)
+                          (schemer-index-definitions form *hot-source-index*) (loop))))
+                    (close-input-port port))))
+              (append (script-files) (if *load-user-scripts* (user-script-files) '()))))
+  (get *hot-source-index* name #f))
+
+;; the free symbols of FORM (local variables of the common binding forms left out)
+(define (hot-free form bound acc)
+  (cond ((symbol? form) (if (or (memq form bound) (memq form acc)) acc (cons form acc)))
+        ((not (pair? form)) acc)
+        ((eq? (car form) 'quote) acc)
+        ((memq (car form) '(lambda named-lambda))
+         (hot-free-body (cddr form) (append (hot-params (cadr form)) bound) acc))
+        ((and (memq (car form) '(let let* letrec letrec*)) (pair? (cdr form)) (symbol? (cadr form)))   ; named let
+         (hot-free-body (cdddr form) (cons (cadr form) (append (map car (caddr form)) bound))
+                        (hot-free-list (map cadr (caddr form)) bound acc)))
+        ((memq (car form) '(let let* letrec letrec*))
+         (hot-free-body (cddr form) (append (map car (cadr form)) bound)
+                        (hot-free-list (map (lambda (b) (if (pair? (cdr b)) (cadr b) #f)) (cadr form))
+                                       (if (eq? (car form) 'let) bound (append (map car (cadr form)) bound)) acc)))
+        ((eq? (car form) 'do)
+         (let ((vars (map car (cadr form))))
+           (hot-free-list (append (map cadr (cadr form)) (map (lambda (s) (if (pair? (cddr s)) (caddr s) #f)) (cadr form))
+                                  (caddr form) (cdddr form))
+                          (append vars bound) acc)))
+        ((eq? (car form) 'define)
+         (if (pair? (cadr form))
+             (hot-free-body (cddr form) (append (hot-params (cadr form)) bound) acc)
+             (hot-free-list (cddr form) bound acc)))
+        (else (hot-free-list form bound acc))))
+(define (hot-free-list forms bound acc)
+  (if (pair? forms) (hot-free-list (cdr forms) bound (hot-free (car forms) bound acc)) acc))
+(define (hot-free-body forms bound acc)
+  ;; internal defines bind their names in the whole body
+  (let ((names (map (lambda (f) (if (pair? (cadr f)) (caadr f) (cadr f)))
+                    (filter (lambda (f) (and (pair? f) (eq? (car f) 'define))) forms))))
+    (hot-free-list forms (append names bound) acc)))
+(define (hot-params p)
+  (cond ((symbol? p) (list p))
+        ((pair? p) (cons (if (pair? (car p)) (caar p) (car p)) (hot-params (cdr p))))
+        (else '())))
+
+(define (hot-constant? v depth)
+  (cond ((or (number? v) (string? v) (char? v) (boolean? v) (symbol? v) (null? v)) #t)
+        ((> depth 3) #f)
+        ((pair? v) (and (hot-constant? (car v) (+ depth 1)) (list? v)
+                        (every (lambda (x) (hot-constant? x (+ depth 1))) v)))
+        ((vector? v) (every (lambda (x) (hot-constant? x (+ depth 1))) (vector->list v)))
+        (else #f)))
+(define (hot-rename form)
+  "FORM with the byte-string procedures renamed, freshly copied: the
+printer would label shared pieces (#0=), which Schemer's reader refuses."
+  (cond ((symbol? form) (let ((r (assq form *hot-renames*))) (if r (cdr r) form)))
+        ((and (pair? form) (eq? (car form) 'quote)) (list 'quote (hot-copy (cadr form))))
+        ((pair? form) (cons (hot-rename (car form)) (hot-rename (cdr form))))
+        ((vector? form) (list->vector (map hot-rename (vector->list form))))
+        ((string? form) (string-append form))
+        (else form)))
+(define (hot-write x)
+  "WRITE without the printer's labels of shared pieces (#0=): atom by atom."
+  (cond ((pair? x)
+         (display "(")
+         (let loop ((x x) (first #t))
+           (cond ((pair? x) (unless first (display " ")) (hot-write (car x)) (loop (cdr x) #f))
+                 ((null? x) #t)
+                 (else (display " . ") (hot-write x))))
+         (display ")"))
+        ((vector? x) (display "#") (hot-write (vector->list x)))
+        (else (write x))))
+(define (hot-copy x)
+  (cond ((pair? x) (cons (hot-copy (car x)) (hot-copy (cdr x))))
+        ((vector? x) (list->vector (map hot-copy (vector->list x))))
+        ((string? x) (string-append x))
+        (else x)))
+
+;; the program for procedure NAME and ENTRY, the procedure of three
+;; arguments the editor calls; #f if NAME's source is not in the scripts
+(define (hot-program name entry)
+  (and (hot-definition name)
+       (let loop ((todo (list name)) (done '()) (defs '()))
+         (cond ((null? todo)
+                (with-output-to-string
+                  (lambda ()
+                    (display *hot-shims*)
+                    (for-each (lambda (d) (hot-write (hot-rename d)) (newline)) defs)
+                    (hot-write entry))))
+               ((or (memq (car todo) done) (assq (car todo) *hot-renames*)) (loop (cdr todo) done defs))
+               (else
+                (let* ((s (car todo)) (d (hot-definition s)))
+                  (cond (d (loop (append (hot-free d '() '()) (cdr todo)) (cons s done)
+                                 ;; femtoscheme's optional arguments (a (b 1)), in R7RS
+                                 (cons (schemer-legacy-form d) defs)))
+                        ((and (bound? s) (hot-constant? (top-level-value s) 0))
+                         (loop (cdr todo) (cons s done) (cons (list 'define s (list 'quote (top-level-value s))) defs)))
+                        (else (loop (cdr todo) (cons s done) defs)))))))))
+
+;; the compiled program of PROC (kind: highlight or wrap), or #f
+(define (hot-of proc kind)
+  (and *hot-enabled* (in-browser?) (bound? 'web-hot-compile)
+       (let ((e (get *hot* proc #f)))
+         (cond ((fixnum? e) e)
+               ((eq? e 'failed) #f)
+               (else
+                (let* ((name (and (procedure? proc) (not (builtin? proc)) (function:name proc)))
+                       (entry (and (symbol? name)
+                                   (if (eq? kind 'highlight)
+                                       (list 'lambda '(text len colors) '(%hot-enter text len colors len)
+                                             (list name #f 'text 'len 'colors) 0)
+                                       (list 'lambda '(text len columns) '(%hot-enter text len 0 0)
+                                             (list name 'text 'columns)))))
+                       (program (and entry (guard (e (#t #f)) (hot-program name entry))))
+                       (id (and program (web-hot-compile program))))
+                  (put! *hot* proc (or id 'failed))
+                  id))))))
+(define (hot-call proc id a b c fallback)
+  "The compiled PROC on A B C; FALLBACK (the Scheme) while it is not ready, or when it failed."
+  (let ((r (web-hot-call id a b c)))
+    (cond ((>= r 0) r)
+          (else (when (= r -2) (put! *hot* proc 'failed)) (fallback)))))
+
+(when (in-browser?)
+  ;; highlight.scm's, with the compiled highlighter when there is one
+  (set! highlight-octets
+        (lambda (lang text len colors)
+          (let* ((h (language-highlighter lang)) (id (and h (hot-of h 'highlight))))
+            (cond (id (hot-call h id text len colors (lambda () (h lang text len colors))))
+                  (h (h lang text len colors))
+                  (else (fe-highlight-tokens (language-token-id lang)
+                                             (if (= len (length text)) text (byte-substring text 0 len))
+                                             colors))))
+          colors))
+  ;; markdown.scm's, with the compiled markdown-wrap-end when there is one
+  (set! markdown-wrap-row
+        (lambda (filename text columns)
+          (cond ((or (not (string? filename)) (string=? filename "")
+                     (<= columns 0) (not (word-wrap-file-p filename)))
+                 0)
+                ((or (not text) (= (length text) 0)) -1)
+                (else (let* ((f markdown-wrap-end) (id (hot-of f 'wrap)))
+                        (if id
+                            (hot-call f id text (length text) columns (lambda () (f text columns)))
+                            (f text columns))))))))
 
 (defcommand (scheme-highlighting)
-  "Colour LaTeX and wrap prose with the Scheme procedures (slow, for checking); again: C."
-  (let ((on (not (eq? markdown-wrap-end web-wrap-end))))
-    (use-fast-highlighting on)
-    (update-display)
-    (message (if on "LaTeX colours and wrapping in C (fast)." "LaTeX colours and wrapping in Scheme (slow)."))))
+  "Colour and wrap with the interpreted Scheme (slow, to compare); again: compiled."
+  (set! *hot-enabled* (not *hot-enabled*))
+  (update-display)
+  (message (if *hot-enabled* "Colours and wrapping compiled (fast)." "Colours and wrapping interpreted (slow).")))
+
+(defcommand (hot-paths)
+  "Which of the editor's busiest procedures run compiled."
+  (message (string-join
+            (map (lambda (p)
+                   (let ((v (get *hot* p #f)))
+                     (concat (->string (function:name p)) ": " (if (fixnum? v) (concat "compiled #" v) "interpreted"))))
+                 (table.keys *hot*))
+            "; ")))
 
 (defcommand (grammarly-status)
   "Whether Grammarly is in the page, and whether it took the [GRAMMAR] field."
@@ -281,6 +489,44 @@ again, and Grammarly checks it again."
   (global-set-key "C-c o" 'open-folder))
 
 ;;; ------------------------------------------------------------------
+;;; The user's own folder: ~/.browsered
+;;; ------------------------------------------------------------------
+;;; Browsered's HOME is kept inside the browser, not on the computer, so
+;;; its settings have a folder of their own, ~/.browsered, rather than
+;;; Schememax's name: init.scm, languages/*.scm, extensions/*.scm, and the
+;;; API keys.  scheme/init.scm loads them after the editor's scripts (and
+;;; again at C-x C-r).  The folder and a short init.scm are made at the
+;;; first start, so C-x C-f ~/.br TAB finds them; the page moves an older
+;;; ~/.schememax there (browsered.js).
+
+(define (personal-folder) (concat (home-directory) "/.browsered"))
+
+(define *personal-init*
+  (string-append
+   ";;;; ~/.browsered/init.scm -- your own settings, loaded after the editor's\n"
+   ";;;; scripts.  Edit, save (C-x C-s) and press C-x C-r: no rebuild.\n"
+   ";;;; Also loaded: ~/.browsered/languages/*.scm, ~/.browsered/extensions/*.scm\n"
+   ";;;;\n"
+   ";;;; (defcommand (enlarge-window-command) (execute-builtin \"enlarge-window\"))\n"
+   ";;;; (global-set-key \"C-^\" 'enlarge-window-command)     ; Emacs key notation\n"
+   ";;;; (set! *fill-column* 78)\n"))
+
+(when (in-browser?)
+  (set! config-file
+        (lambda file (concat (personal-folder) "/" (if (pair? file) (car file) ""))))
+  (set! user-script-files
+        (lambda ()
+          (let ((home (personal-folder)))
+            (append (scheme-files (string-append home "/languages"))
+                    (scheme-files (string-append home "/extensions"))
+                    (let ((init (string-append home "/init.scm")))
+                      (if (path.exists? init) (list init) '()))))))
+  (unless (path.exists? (string-append (personal-folder) "/init.scm"))
+    (web-request "mkdirs" (personal-folder))
+    (call-with-output-file (string-append (personal-folder) "/init.scm")
+      (lambda (p) (io.write p *personal-init*)))))
+
+;;; ------------------------------------------------------------------
 ;;; The name on the start-up page
 ;;; ------------------------------------------------------------------
 
@@ -335,7 +581,7 @@ answer's status and text."
 (define (save-key name key)
   (web-request "mkdirs" (config-file))
   (call-with-output-file (config-file name) (lambda (p) (io.write p (string-append (trim key) "\n"))))
-  (message "Saved in ~/.schememax/" name))
+  (message "Saved in " (config-file name)))
 
 (defcommand (set-claude-key)
   (let ((key (if (in-browser?) (web-request "api-key" "Anthropic API key (console.anthropic.com)")

@@ -154,6 +154,8 @@ names (esc d, esc C-f, esc backspace, C-_ ...); a list of one or two."
           ((member k '("C-SPC" "C-@")) "C-space")
           ((member k '("C-/" "C--")) "C-_")
           ((string=? k "<f1>") "F1")
+          ((member k '("<left>" "<right>" "<up>" "<down>"))      ; C-x <left>
+           (byte-substring k 1 (- (length k) 1)))
           ((and (= (length k) 3) (string-prefix? "C-" k)
                 (char-upper-case? (string-ref k 2)))
            (string "C-" (char-downcase (string-ref k 2))))

@@ -228,3 +228,7 @@ a folder ends in /."
 
 (global-set-key "C-x >" 'indent-two)
 (global-set-key "C-x <" 'deindent-two)
+
+(defcommand (enlarge-window-command) (execute-builtin "enlarge-window"))
+
+(global-set-key "C-^" 'enlarge-window-command)

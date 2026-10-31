@@ -388,9 +388,30 @@ is under LIMIT bytes, otherwise the part around the cursor."
 (defvar *assistant-last-answer* #f)
 (defvar *assistant-origin* #f)
 
+;;; The assistants' windows leave the others alone.  A window for an answer,
+;;; a question or a discussion is made by splitting the window of the file
+;;; asked about; closing it ([CLOSE], C-c q, C-c y) deletes it, and its rows
+;;; go back to the window above, so the screen is as it was before: two
+;;; windows stay two.
+
+(define (shown-assistant-buffer)
+  "The name of an assistant buffer (answer or question) some window shows, or #f."
+  (let loop ((names *assistant-buffer-names*))
+    (cond ((null? names) #f)
+          ((buffer-shown-p (car names)) (car names))
+          (else (loop (cdr names))))))
+
+(define (open-assistant-window buffer)
+  "Select a window for BUFFER: the one an answer or a question already
+has (the answer replaces the question), or a new one below."
+  (let ((shown (shown-assistant-buffer)))
+    (if shown
+        (begin (select-window-showing shown) (select-buffer buffer))
+        (open-window-below buffer))))
+
 (define (show-in-assistant-window title text)
   "Show TEXT in *ASSISTANT-BUFFER* in a window below; the cursor stays
-where it was.  An open discussion window stays open."
+where it was.  The other windows stay as they are."
   (let ((fill (lambda ()
                 (erase-buffer)
                 (insert title "\n" (make-string (min 70 (string-length title)) #\-) "\n\n")
@@ -400,20 +421,14 @@ where it was.  An open discussion window stays open."
     (if (buffer-shown-p *assistant-buffer*)
         (call-in-window-of *assistant-buffer* fill)
         (let ((origin (get-buffer-name)))
-          (unless (or (buffer-shown-p *claude-discussion-buffer*)
-                      (buffer-shown-p *codex-discussion-buffer*))
-            (delete-other-windows))
-          (split-window)
-          (other-window)
-          (select-buffer *assistant-buffer*)
+          (open-assistant-window *assistant-buffer*)
           ;; [TANGLE] inserts the answer's code (or makes the buffer it
           ;; proposes) in the file asked about, as C-c y does
           (set-buffer-menu *assistant-buffer*
                            '(("TANGLE" "C-c y") ("CLOSE" close-assistant-windows)))
           (fill)
-          ;; back to the window above
-          (do ((k 0 (+ k 1))) ((>= k (- (window-count) 1))) (other-window))
-          (unless (string=? (get-buffer-name) origin) (select-buffer origin))))))
+          ;; back to the file's window
+          (go-to-file-window origin)))))
 
 (define (one-line-question q)
   (let ((q (trim q)))
@@ -425,7 +440,7 @@ where it was.  An open discussion window stays open."
 (define (answer-hint answer)
   (cond ((pair? (proposed-buffers answer)) "C-c y create buffer & close")
         ((proposed-code answer) "C-c y insert code & close")
-        (else "C-x 1 close")))
+        (else "C-c q close")))
 
 (define (run-assistant key question context origin)
   "Send QUESTION (\"\" for hints) and CONTEXT to the assistant KEY and show
@@ -433,7 +448,7 @@ the answer below the buffer ORIGIN."
   (let* ((assistant (find-assistant key))
          (name (assistant-name assistant)))
     (set! *assistant-origin* origin)
-    (unless (string=? (get-buffer-name) origin) (select-buffer origin))
+    (go-to-file-window origin)
     (message name " is thinking ... (up to " (if (eq? key 'codex) *codex-timeout* *assistant-timeout*) " s)")
     (update-display)
     (guard (e (#t
@@ -443,7 +458,7 @@ the answer below the buffer ORIGIN."
                 (string-append name " could not be reached")
                 (string-append (describe-error e) "\n\n"
                                (if (eq? key 'codex) (codex-status-text) (assistant-status-text))))
-               (set-buffer-hint *assistant-buffer* "C-x 1 close")
+               (set-buffer-hint *assistant-buffer* "C-c q close")
                (message name " could not be reached; see the window below")))
       (let ((answer ((assistant-ask assistant) question context)))
         (set! *assistant-last-answer* answer)
@@ -455,7 +470,7 @@ the answer below the buffer ORIGIN."
                  (cond ((pair? (proposed-buffers answer))
                         "C-c y creates the buffer it proposes and closes the window")
                        ((proposed-code answer) "C-c y inserts the code and closes the window")
-                       (else "C-x 1 closes the window")))))))
+                       (else "C-c q closes the window")))))))
 
 ;;; ------------------------------------------------------------------
 ;;; C-c r: the menu
@@ -467,11 +482,8 @@ the answer below the buffer ORIGIN."
   "Open *claude-request* below ORIGIN, for a question of any length."
   (set! *assistant-saved-context* context)
   (set! *assistant-origin* origin)
-  (unless (string=? (get-buffer-name) origin) (select-buffer origin))
-  (delete-other-windows)
-  (split-window)
-  (other-window)
-  (select-buffer *claude-request-buffer*)
+  (go-to-file-window origin)
+  (open-assistant-window *claude-request-buffer*)
   (set-buffer-menu *claude-request-buffer*
                    '(("SEND" "C-c r") ("TANGLE" "C-c y") ("CLOSE" close-assistant-windows)))
   (erase-buffer)
@@ -513,18 +525,24 @@ discussion, send what was written since the last answer."
   (or *assistant-origin* *codex-origin-buffer* "*scratch*"))
 
 (defcommand (close-assistant-windows)
-  "Close every window showing a Claude or Codex buffer."
+  "Close every window showing a Claude or Codex answer or question; the
+other windows are as they were before it opened."
   (let ((origin (get-buffer-name)))
     (let loop ((k 0))
       (when (and (< k (* 2 (window-count))) (> (window-count) 1))
         (if (assistant-buffer-p (get-buffer-name)) (delete-window) (other-window))
         (loop (+ k 1))))
     (when (assistant-buffer-p (get-buffer-name)) (select-buffer (file-behind-assistant)))
-    ;; back to the window that was selected, if it is still there
-    (let loop ((k 0))
-      (when (and (< k (window-count)) (not (string=? (get-buffer-name) origin)))
-        (other-window) (loop (+ k 1))))
+    ;; back to the window that was selected, or to the file asked about
+    (unless (select-window-showing origin) (select-window-showing (file-behind-assistant)))
     #t))
+
+(defcommand (assistant-close)
+  "C-c q: close the assistant's window, as its [CLOSE] does: the answer or
+question, or, from the discussion, the discussion.  The other windows stay."
+  (cond ((discussion-buffer-p (get-buffer-name)) (close-discussion-window))
+        ((shown-assistant-buffer) (close-assistant-windows))
+        (else (close-discussion-window))))
 
 ;;; ------------------------------------------------------------------
 ;;; What is set up, and how to fix it
@@ -551,7 +569,7 @@ discussion, send what was written since the last answer."
 (defcommand (assistant-status)
   "How the assistant would reach Claude."
   (show-in-assistant-window "Assistant status" (assistant-status-text))
-  (set-buffer-hint *assistant-buffer* "C-x 1 close")
+  (set-buffer-hint *assistant-buffer* "C-c q close")
   #t)
 
 ;;; ------------------------------------------------------------------
@@ -724,17 +742,15 @@ or a file in it.  Selects that buffer."
   (string-append "Discussion with " who " about " origin "\n"
                  key " sends what you write after the last " marker "\n"
                  "C-c t inserts the snippet under the cursor into " origin "\n"
-                 "C-x 0 closes this window; " key ", then d, brings it back\n"
+                 "C-c q closes this window; " key ", then d, brings it back\n"
                  (make-string 70 #\=) "\n\n" marker "\n"))
 
 (define (claude-discussion origin)
   "Open (or go back to) the discussion about ORIGIN, below it."
-  (unless (string=? (get-buffer-name) origin) (select-buffer origin))
+  (go-to-file-window origin)
   (set! *discussion-origin* origin)
-  (delete-other-windows)
-  (split-window)
-  (other-window)
-  (select-buffer *claude-discussion-buffer*)
+  (unless (select-window-showing *claude-discussion-buffer*)
+    (open-window-below *claude-discussion-buffer*))
   (set-buffer-menu *claude-discussion-buffer*
                    '(("SEND" "C-c r") ("TANGLE" "C-c t") ("CLOSE" close-discussion-window)))
   (when (= 0 (buffer-size))
@@ -813,6 +829,7 @@ is kept, and C-c r d (or C-c g d) brings it back."
       (loop (+ k 1))))
   (when (discussion-buffer-p (get-buffer-name))
     (select-buffer (or *discussion-origin* *codex-discussion-origin* "*scratch*")))
+  (select-window-showing (or *discussion-origin* *codex-discussion-origin* "*scratch*"))
   #t)
 
 ;;; ------------------------------------------------------------------

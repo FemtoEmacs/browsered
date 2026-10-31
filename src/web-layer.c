@@ -105,3 +105,59 @@ void web_layer_update(void)
 	puts_("\"}");
 	web_layer(out);
 }
+
+/*
+ * The page changed size, or Scheme from the page ran: redraw the windows.
+ * The core's own answer to a resize (resize_terminal, Femto's) is a single
+ * window, which lost the windows of C-x 2 whenever the browser window
+ * changed size.  Here the windows keep their share of the screen; only if
+ * the page becomes too short for them all do the last ones go (never the
+ * selected one).  ROWS: the new height of the grid.
+ */
+void web_relayout(int rows)
+{
+	window_t *wp;
+	int old = 0, avail = rows - 1, n = 0, top = 0, left, k = 0;
+
+	if (wheadp == NULL || curwp == NULL) return;
+	for (wp = wheadp; wp != NULL; wp = wp->w_next) { old += wp->w_rows + 1; n++; }
+	/* each window needs a text row and its mode line */
+	while (n > 1 && avail < 2 * n) {
+		window_t *last = NULL, *prev = NULL;
+		for (wp = wheadp; wp != NULL; wp = wp->w_next)
+			if (wp != curwp) { last = wp; }
+		for (wp = wheadp; wp != NULL && wp->w_next != last; wp = wp->w_next) ;
+		prev = (last == wheadp) ? NULL : wp;
+		if (last == NULL) break;
+		if (prev) prev->w_next = last->w_next; else wheadp = last->w_next;
+		old -= last->w_rows + 1;
+		n--;
+	}
+	if (old <= 0) old = 1;
+	left = avail;
+	for (wp = wheadp; wp != NULL; wp = wp->w_next, k++) {
+		int share = wp->w_next == NULL ? left : (int) ((long) (wp->w_rows + 1) * avail / old);
+		if (share < 2) share = 2;
+		if (share > left - 2 * (n - k - 1)) share = left - 2 * (n - k - 1);
+		/* fewer rows: the old end of the window no longer shows, so the
+		 * display finds the cursor's row again (display.c reframes) */
+		if (share - 1 < wp->w_rows) {
+			wp->w_epage = wp->w_page;
+			/* the selected window's live values are its buffer's */
+			if (wp == curwp) wp->w_bufp->b_epage = wp->w_bufp->b_page;
+		}
+		wp->w_top = top;
+		wp->w_rows = share - 1;
+		wp->w_update = TRUE;
+		top += share;
+		left -= share;
+	}
+}
+
+/* everything drawn again (the core's update after a command) */
+void web_redisplay(void)
+{
+	if (wheadp == NULL || curwp == NULL) return;
+	mark_all_windows();
+	update_display();
+}

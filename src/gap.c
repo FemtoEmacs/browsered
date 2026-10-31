@@ -4,6 +4,7 @@
  */
 
 #include <sys/stat.h>
+#include <errno.h>
 #include "header.h"
 
 /* Enlarge gap by n chars, position of gap cannot change */
@@ -104,6 +105,42 @@ int posix_file(char *fn)
 	return (TRUE);
 }
 
+/*
+ * The folder of FN does not exist (a first ~/.schememax/init.scm, say):
+ * ask, as Emacs does, and make it with the folders above it.  Only on an
+ * explicit save, and only after a "y".
+ */
+static int make_parent_folders(char *fn)
+{
+	char dir[NAME_MAX + 1], *slash, *p;
+	struct stat sb;
+
+	if (strlen(fn) > NAME_MAX || (slash = strrchr(fn, '/')) == NULL || slash == fn)
+		return (FALSE);
+	memcpy(dir, fn, (size_t) (slash - fn));
+	dir[slash - fn] = '\0';
+	if (stat(dir, &sb) == 0)
+		return (FALSE);                 /* it exists: some other reason */
+	screen_mvaddstr(MSGLINE, 0, "Folder ");
+	screen_addstr(dir);
+	screen_addstr(" does not exist; create it (y/n) ?");
+	screen_clrtoeol();
+	if (!yesno(FALSE))
+		return (FALSE);
+	for (p = dir + 1; ; p++) {
+		if (*p == '/' || *p == '\0') {
+			char c = *p;
+			*p = '\0';
+			if (stat(dir, &sb) != 0 && mkdir(dir, 0755) != 0 && errno != EEXIST)
+				return (FALSE);
+			*p = c;
+			if (c == '\0')
+				break;
+		}
+	}
+	return (TRUE);
+}
+
 int save_buffer(buffer_t *bp, char *fn)
 {
 	FILE *fp;
@@ -114,6 +151,8 @@ int save_buffer(buffer_t *bp, char *fn)
 		return (FALSE);
 	}
 	fp = fopen(fn, "wb");
+	if (fp == NULL && errno == ENOENT && make_parent_folders(fn))
+		fp = fopen(fn, "wb");
 	if (fp == NULL) {
 		msg(m_open, fn);
 		return (FALSE);

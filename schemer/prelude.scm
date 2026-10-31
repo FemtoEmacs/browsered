@@ -18,12 +18,161 @@
          obj))
 
 ;;; Records ------------------------------------------------------------------
-;;; A record is a struct of its type and a vector of its fields; a record
-;;; type is a pair (name . field-names), unique.
+;;; A record is a struct of its type and a vector of its fields.  The
+;;; library's own types (errors, ports, tables ...) are unique pairs.  The
+;;; types a program defines are record-type descriptors, as in R6RS and
+;;; Chez Scheme: rtds, themselves records of %rtd-type, with a parent; a
+;;; record's fields are its ancestors' fields, then its own.
 
-(define (%make-record-type name fields) (cons name fields))
 (define (%record-of? x type) (and (%record? x) (eq? (%record-tag x) type)))
 (define (%record-error obj who) (error "wrong type of argument to" who obj))
+
+;; rtd fields: 0 name, 1 parent, 2 uid, 3 sealed?, 4 opaque?, 5 own fields
+;; (a vector of (mutable name) / (immutable name)), 6 all fields counted
+;; with the ancestors', 7 the default constructor descriptor
+(define %rtd-type (cons (quote record-type-descriptor) (quote ())))
+(define %rcd-type (cons (quote record-constructor-descriptor) (quote ())))
+(define %nongenerative (cons (quote nongenerative) (quote ())))   ; uid -> rtd, an alist
+(define (%rf r i) (vector-ref (%record-fields r) i))
+(define (record-type-descriptor? x) (%record-of? x %rtd-type))
+(define (record-constructor-descriptor? x) (%record-of? x %rcd-type))
+(define (%check-rtd x who) (if (record-type-descriptor? x) x (error "not a record-type descriptor:" who x)))
+
+(define (make-record-type-descriptor name parent uid sealed? opaque? fields)
+  (if parent (begin (%check-rtd parent (quote make-record-type-descriptor))
+                    (if (%rf parent 3) (error "the parent record type is sealed:" (%rf parent 0)))))
+  (let ((old (and uid (assq uid (cdr %nongenerative)))))
+    (if old
+        (cdr old)
+        (let* ((fields (if (vector? fields) fields (list->vector fields)))
+               (rtd (%make-record %rtd-type
+                                  (vector name parent uid sealed?
+                                          (or opaque? (and parent (%rf parent 4)))
+                                          fields
+                                          (+ (vector-length fields) (if parent (%rf parent 6) 0))
+                                          #f))))
+          (if uid (set-cdr! %nongenerative (cons (cons uid rtd) (cdr %nongenerative))))
+          rtd))))
+
+(define (record-type-name rtd) (%rf (%check-rtd rtd (quote record-type-name)) 0))
+(define (record-type-parent rtd) (%rf (%check-rtd rtd (quote record-type-parent)) 1))
+(define (record-type-uid rtd) (%rf (%check-rtd rtd (quote record-type-uid)) 2))
+(define (record-type-generative? rtd) (not (record-type-uid rtd)))
+(define (record-type-sealed? rtd) (%rf (%check-rtd rtd (quote record-type-sealed?)) 3))
+(define (record-type-opaque? rtd) (%rf (%check-rtd rtd (quote record-type-opaque?)) 4))
+(define (record-type-field-names rtd)
+  (let* ((fs (%rf (%check-rtd rtd (quote record-type-field-names)) 5))
+         (v (make-vector (vector-length fs) #f)))
+    (do ((i 0 (+ i 1))) ((= i (vector-length fs)) v) (vector-set! v i (cadr (vector-ref fs i))))))
+(define (record-field-mutable? rtd k)
+  (eq? (car (vector-ref (%rf (%check-rtd rtd (quote record-field-mutable?)) 5) k)) (quote mutable)))
+
+;; is the record type T RTD or one of its descendants?
+(define (%rtd-descends? t rtd)
+  (cond ((eq? t rtd) #t)
+        ((record-type-descriptor? t) (let ((p (%rf t 1))) (and p (%rtd-descends? p rtd))))
+        (else #f)))
+(define (%instance-of? x rtd) (and (%record? x) (%rtd-descends? (%record-tag x) rtd)))
+(define (record? x . rtd)
+  (and (%record? x)
+       (let ((t (%record-tag x)))
+         (if (pair? rtd)
+             (%rtd-descends? t (car rtd))
+             (and (record-type-descriptor? t) (not (%rf t 4)))))))
+(define (record-rtd x)
+  (if (record? x) (%record-tag x) (error "not a record, or an opaque one:" x)))
+
+(define (record-predicate rtd)
+  (%check-rtd rtd (quote record-predicate))
+  (if (%rf rtd 3)
+      (lambda (x) (%record-of? x rtd))      ; sealed: no descendants
+      (lambda (x) (%instance-of? x rtd))))
+(define (%field-index rtd k who)
+  (%check-rtd rtd who)
+  (if (and (fixnum? k) (>= k 0) (< k (vector-length (%rf rtd 5))))
+      (+ k (- (%rf rtd 6) (vector-length (%rf rtd 5))))
+      (error "no such field:" who k)))
+(define (record-accessor rtd k)
+  (let ((i (%field-index rtd k (quote record-accessor))))
+    (lambda (x) (if (%instance-of? x rtd) (vector-ref (%record-fields x) i)
+                    (%record-error x (list (record-type-name rtd) (cadr (vector-ref (%rf rtd 5) k))))))))
+(define (record-mutator rtd k)
+  (let ((i (%field-index rtd k (quote record-mutator))))
+    (if (not (record-field-mutable? rtd k)) (error "the field is immutable:" (cadr (vector-ref (%rf rtd 5) k))))
+    (lambda (x v) (if (%instance-of? x rtd) (vector-set! (%record-fields x) i v)
+                      (%record-error x (list (record-type-name rtd) (cadr (vector-ref (%rf rtd 5) k))))))))
+
+;; constructor descriptors: fields 0 rtd, 1 parent descriptor, 2 protocol
+(define (make-record-constructor-descriptor rtd parent-rcd protocol)
+  (%check-rtd rtd (quote make-record-constructor-descriptor))
+  (let ((parent-rcd (or parent-rcd (and (%rf rtd 1) (%default-rcd (%rf rtd 1))))))
+    (%make-record %rcd-type (vector rtd parent-rcd protocol))))
+(define (%default-rcd rtd)
+  (or (%rf rtd 7)
+      (let ((rcd (make-record-constructor-descriptor rtd #f #f)))
+        (vector-set! (%record-fields rtd) 7 rcd)
+        rcd)))
+;; define-record-type with a protocol: that descriptor is the type's own
+(define (%set-rtd-rcd! rtd rcd) (vector-set! (%record-fields rtd) 7 rcd) rcd)
+(define (record-type-descriptor rtd) (%check-rtd rtd (quote record-type-descriptor)))
+(define (record-constructor-descriptor rtd) (%rtd-rcd rtd))
+;; Chez define-record's constructor: the parent's fields, then N own
+(define (%chez-construct rtd n args k)
+  (let ((np (if (%rf rtd 1) (%rf (%rf rtd 1) 6) 0)))
+    (if (= (length args) (+ np n))
+        (apply k (list-head args np) (list-tail args np))
+        (error "wrong number of arguments to the constructor of" (%rf rtd 0) args))))
+;; (record-constructor-descriptor NAME) of a define-record-type
+(define (%rtd-rcd rtd) (%default-rcd (%check-rtd rtd (quote record-constructor-descriptor))))
+
+;; The protocol of a level gets a procedure P: for a type without parent, P
+;; takes the type's fields and makes the record; with a parent, P takes the
+;; parent constructor's arguments and gives a procedure of the type's own
+;; fields.  AFTER: the fields of the descendants, already known.
+(define (%rcd-protocol rcd)
+  (or (%rf rcd 2)
+      (let ((rtd (%rf rcd 0)))
+        (if (%rf rtd 1)
+            (let ((n-parent (%rf (%rf rtd 1) 6)))   ; default: the parent's fields, then ours
+              (lambda (p) (lambda args
+                            (let loop ((i 0) (as args) (parent-args (quote ())))
+                              (if (< i n-parent)
+                                  (if (pair? as) (loop (+ i 1) (cdr as) (cons (car as) parent-args))
+                                      (error "too few arguments to the constructor of" (record-type-name rtd)))
+                                  (apply (apply p (reverse parent-args)) as))))))
+            (lambda (p) p)))))
+(define (record-constructor rcd)
+  (if (not (record-constructor-descriptor? rcd)) (error "not a record-constructor descriptor:" rcd))
+  ;; the record's type: the descriptor's own (the most derived)
+  ((%rcd-protocol rcd) (%rcd-maker* rcd (quote ()) (%rf rcd 0))))
+(define (%rcd-maker* rcd after final-rtd)
+  (let* ((rtd (%rf rcd 0)) (n (vector-length (%rf rtd 5))) (parent (%rf rcd 1)))
+    (define (own fields)
+      (if (= (length fields) n) (append fields after)
+          (error "wrong number of fields for" (record-type-name rtd) fields)))
+    (if parent
+        (lambda parent-args
+          (lambda fields
+            (apply ((%rcd-protocol parent) (%rcd-maker* parent (own fields) final-rtd)) parent-args)))
+        (lambda fields (%make-record final-rtd (list->vector (own fields)))))))
+
+;; Chez's (make-record-type name fields) and (make-record-type parent name
+;; fields): a generative type; fields are names or (mutable name).
+(define (make-record-type a b . c)
+  (let* ((parent (if (pair? c) a #f)) (name (if (pair? c) b a)) (fields (if (pair? c) (car c) b)))
+    (make-record-type-descriptor (if (string? name) (string->symbol name) name) parent #f #f #f
+      (map (lambda (f) (cond ((symbol? f) (list (quote mutable) f))
+                             ((string? f) (list (quote mutable) (string->symbol f)))
+                             (else f)))
+           fields))))
+(define (record-field-accessor rtd name) (record-accessor rtd (%field-number rtd name)))
+(define (record-field-mutator rtd name) (record-mutator rtd (%field-number rtd name)))
+(define (%field-number rtd name)
+  (let ((fs (%rf (%check-rtd rtd (quote record-field-accessor)) 5)) (name (if (string? name) (string->symbol name) name)))
+    (let loop ((i 0))
+      (cond ((= i (vector-length fs)) (error "no such field:" name))
+            ((eq? (cadr (vector-ref fs i)) name) i)
+            (else (loop (+ i 1)))))))
 
 ;;; Escapes, exceptions -----------------------------------------------------
 ;;; (%catch thunk tag), (%throw tag value), (%protect thunk after): the host
@@ -528,6 +677,7 @@
         (else (%append2 (car ls) (apply append (cdr ls))))))
 (define (reverse l) (let loop ((l l) (acc '())) (if (null? l) acc (loop (cdr l) (cons (car l) acc)))))
 (define (list-tail l k) (if (= k 0) l (list-tail (cdr l) (- k 1))))
+(define (list-head l k) (let loop ((l l) (k k) (acc (quote ()))) (if (= k 0) (reverse acc) (loop (cdr l) (- k 1) (cons (car l) acc)))))
 (define (list-ref l k) (car (list-tail l k)))
 (define (last-pair l) (if (pair? (cdr l)) (last-pair (cdr l)) l))
 (define (memq x l) (cond ((null? l) #f) ((eq? x (car l)) l) (else (memq x (cdr l)))))
@@ -1056,6 +1206,13 @@
   (let ((c (%peek p)))
     (cond ((eof-object? c) (error "read: # at the end"))
           ((char=? c #\() (%next p) (list->vector (%read-list p #\))))
+          ;; #'x #`x #,x #,@x: syntax, quasisyntax, unsyntax, unsyntax-splicing
+          ((char=? c #\') (%next p) (list (quote syntax) (%read-next p)))
+          ((char=? c #\`) (%next p) (list (quote quasisyntax) (%read-next p)))
+          ((char=? c #\,) (%next p)
+           (if (eqv? (%peek p) #\@)
+               (begin (%next p) (list (quote unsyntax-splicing) (%read-next p)))
+               (list (quote unsyntax) (%read-next p))))
           ((char=? c #\\)
            (%next p)
            (let* ((first (%next p))
@@ -1117,6 +1274,13 @@
         ((port? x) (%put-string "#<port>"))
         ((bytevector? x) (%put-string "#u8") (%print-list (vector->list (%bytes x)) #f))
         ((error-object? x) (%put-string "#<error ") (write (error-object-message x)) (%put-string ">"))
+        ((record? x)   ; as Chez: #[name field ...]
+         (%put-string "#[") (%print (record-type-name (%record-tag x)) #f)
+         (vector-for-each (lambda (v) (%emit #\space) (%print v quote?)) (%record-fields x))
+         (%emit #\]))
+        ((and (%record? x) (record-type-descriptor? (%record-tag x)))   ; opaque
+         (%put-string "#<") (%print (record-type-name (%record-tag x)) #f) (%put-string ">"))
+        ((record-type-descriptor? x) (%put-string "#<record type ") (%print (%rf x 0) #f) (%put-string ">"))
         ((%record? x) (%put-string "#<") (%print (car (%record-tag x)) #f) (%put-string ">"))
         ((vector? x) (%emit #\#) (%print-list (vector->list x) quote?))
         ((procedure? x) (%put-string "#<procedure>"))

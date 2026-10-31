@@ -61,10 +61,8 @@ window.
   (set! *codex-origin-buffer* (or origin (get-buffer-name)))
   (set! *codex-saved-context* (or context (buffer-context)))
   (set! *codex-working-directory* (codex-source-directory))
-  (delete-other-windows)
-  (split-window)
-  (other-window)
-  (select-buffer *codex-request-buffer*)
+  (go-to-file-window *codex-origin-buffer*)
+  (open-assistant-window *codex-request-buffer*)
   (set-buffer-menu *codex-request-buffer*
                    '(("SEND" "C-c g") ("TANGLE" "C-c y") ("CLOSE" close-assistant-windows)))
   (erase-buffer)
@@ -165,7 +163,7 @@ window.
 (defcommand (codex-status)
   "Show Codex's set-up in the lower window."
   (show-in-assistant-window "Codex status" (codex-status-text))
-  (set-buffer-hint *assistant-buffer* "C-x 1 close")
+  (set-buffer-hint *assistant-buffer* "C-c q close")
   #t)
 
 ;;; ------------------------------------------------------------------
@@ -177,13 +175,11 @@ window.
 
 (define (codex-discussion origin)
   "Open (or return to) the persistent Codex discussion about ORIGIN."
-  (unless (string=? (get-buffer-name) origin) (select-buffer origin))
+  (go-to-file-window origin)
   (set! *codex-discussion-origin* origin)
   (set! *codex-working-directory* (codex-source-directory))
-  (delete-other-windows)
-  (split-window)
-  (other-window)
-  (select-buffer *codex-discussion-buffer*)
+  (unless (select-window-showing *codex-discussion-buffer*)
+    (open-window-below *codex-discussion-buffer*))
   (set-buffer-menu *codex-discussion-buffer*
                    '(("SEND" "C-c g") ("TANGLE" "C-c t") ("CLOSE" close-discussion-window)))
   (when (= 0 (buffer-size))

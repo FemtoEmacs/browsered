@@ -344,6 +344,7 @@ extern void delete_mode(buffer_t *, buffer_flags_t);
 extern void buffer_init(buffer_t *);
 extern int delete_buffer(buffer_t *);
 extern void next_buffer(void);
+extern void previous_buffer(void);
 extern int count_buffers(void);
 extern int count_windows(void);
 extern int modified_buffers(void);

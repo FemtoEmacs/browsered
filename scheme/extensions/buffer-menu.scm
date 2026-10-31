@@ -3,9 +3,11 @@
 ;;;; Port of SBEmacs's lisp/extensions/buffer-menu.lisp (originally
 ;;;; samples/bufmenu.scm, Hugh Barney, September 2016).
 ;;;;
-;;;; Lists the buffers; move with the arrow keys (or C-n / C-p), then
-;;;; RET or 1  switch to the buffer as a single window
-;;;;   2  split the screen between that buffer and the original one
+;;;; Lists the buffers in the selected window (the other windows stay, as
+;;;; in Emacs); move with the arrow keys (or C-n / C-p), then
+;;;;   RET  show the buffer in that window
+;;;;   1  show it as the only window
+;;;;   2  split the window between that buffer and the original one
 ;;;;   s  save the buffer if modified
 ;;;;   k  kill the buffer
 ;;;;   q, x, C-g  exit the menu
@@ -62,7 +64,9 @@
                (select-buffer *bufm-obuf*)
                (select-buffer "*scratch*"))
            (set! *bufm-stop* #t))
-          ((and (member k '("1" "\r" "\n")) several)
+          ((and (member k '("\r" "\n")) several)
+           (select-buffer *bufm-buf*) (set! *bufm-stop* #t))
+          ((and (string=? k "1") several)
            (select-buffer *bufm-buf*) (delete-other-windows) (set! *bufm-stop* #t))
           ((member k '("n" " ")) (bufm-move-line 1) (set! *bufm-buf* (bufm-get-bufn)))
           ((string=? k "p") (bufm-move-line -1) (set! *bufm-buf* (bufm-get-bufn)))
@@ -76,18 +80,17 @@
            (set! *bufm-buf* (bufm-get-bufn))))))
 
 (defcommand (buffer-menu)
-  "C-x C-b: arrows select; RET opens; 2 splits; s saves; k kills; q cancels."
+  "C-x C-b: arrows select; RET opens here; 1 alone; 2 splits; s saves; k kills; q cancels."
   (set! *bufm-obuf* (get-buffer-name))
   (set! *bufm-names* (filter (lambda (name) (not (string=? name "*buffers*"))) (buffer-names)))
   (list-buffers)
   (set! *bufm-line* *bufm-start-line*)
   (set! *bufm-stop* #f)
   (bufm-refresh-limits)
-  (delete-other-windows)
   (set! *bufm-buf* (bufm-get-bufn))
   (let loop ((n 0))
     (when (and (< n *bufm-max-ops*) (not *bufm-stop*))
-      (message "Buffer menu: arrows/n/p select; RET opens; 2 split; s save; k kill; q/C-g cancel")
+      (message "Buffer menu: arrows/n/p select; RET opens; 1 alone; 2 split; s save; k kill; q/C-g cancel")
       (update-display)
       (let ((key (get-key)))
         (if (string=? key "") (bufm-handle-bound-key) (bufm-handle-single-key key)))

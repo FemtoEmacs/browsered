@@ -134,6 +134,27 @@ in C (src/highlight.c), which runs at every redisplay."
              (find (lambda (l) (member ext (language-extensions l))) *languages*))
         *default-language*)))
 
+;; A language may hold pieces of other languages: Markdown's ``` blocks
+;; (```scheme).  Its procedure, given the buffer's text up to the end of a
+;; line and that line's start, answers (language . start of the piece) or
+;; #f.  Indentation, M-; and M-q then follow the piece's language.
+(defvar *inner-languages* (table))      ; lower-case language name -> procedure
+
+(define (define-inner-language language procedure)
+  (put! *inner-languages* (string-downcase language) procedure))
+
+(define (language-place (pos (point)))
+  "(language . start): the language at POS in this buffer, and where the
+text in that language starts (0 for the whole buffer).  #f: none."
+  (let* ((lang (language-for-file (or (buffer-filename) (get-buffer-name))))
+         (inner (and lang (get *inner-languages* (string-downcase (language-name lang)) #f)))
+         (ls (line-start pos)))
+    (or (and inner (inner (buffer-substring 0 (line-end ls)) ls))
+        (and lang (cons lang 0)))))
+
+(define (language-at-point (pos (point)))
+  (let ((place (language-place pos))) (and place (car place))))
+
 ;;; ------------------------------------------------------------------
 ;;; The tokenizer
 ;;; ------------------------------------------------------------------

@@ -40,7 +40,7 @@
 
 |         |                               |
 | :------ | :---------------------------- |
-| `DEL`   | delete char before the cursor |
+| `BkSp`  | delete char before the cursor |
 | `C-d`   | delete char under the cursor  |
 | `C-k`   | kill to end of line           |
 | `C-/`   | undo; again: undo more        |
@@ -48,6 +48,20 @@
 | `TAB`   | indent the line               |
 | `M-q`   | refill the paragraph          |
 | `M-;`   | comment line or region        |
+
+
+**Code blocks**
+In Markdown, commands such as `M-;` (comment line) and `TAB` (indent the line)
+work only in code blocks, and obey the syntax of the computer language you are
+editing.
+
+```Scheme
+(define (fib n)
+  (if (< n 2)
+      (+ (fib (- n 2))
+         (fib (- n 1)) )))
+
+```
 
 **Region (shaded)**  
 
@@ -91,6 +105,7 @@
 | `C-c r`   | call Claude             |
 | `C-c y`   | insert Claude’s code    |
 | `C-c g`   | call Codex/ChatGPT      |
+| `C-c q`   | close Codex/Claude      |
 
 # The commands in detail
 
@@ -118,7 +133,7 @@ click:
 
 > 
 > 
->     fib.lisp*, L. 5 == SBEmacs: [HELP] [SAVE] [OPEN] [COPY] ...
+>  fib.lisp*, L. 5  [?] [SAVE][UNDO][Select][MORE][TTFY][GRAMMAR] ...
 
 A button does what its key does, so Nia, the Canadian
 girl who is learning how to code, can work before she
@@ -130,15 +145,22 @@ learns the keys, and learn them from the buttons:
 > | :--------------- | :-------- | :-------------------------- |
 > | `[?]` + 1        | `C-h`     | every key on one page       |
 > | `[SAVE]`         | `C-x C-s` | save the file               |
+> | `[UNDO]`         | `C-/`     | undo                        |
 > | `[MORE]` Open    | `C-x C-f` | open a file                 |
 > | `[MORE]` Copy    | `M-w`     | copy the selection          |
 > | `[MORE]` Paste   | `C-y`     | paste                       |
-> | `[UNDO]`         | `C-/`     | undo                        |
 > | `[?]` 2 or 3     |           | how to ask Claude or Codex  |
 > | `[MORE]` Buffers | `C-x b`   | switch to another open file |
 > | `[QUIT]`         | `C-x C-c` | leave SBEmacs               |
+> | `[GRAMMAR]`      |           | Toggle Grammarly            |
 > 
 
+Grammarly is a pain in the ass, but if you need to write in English,
+you have no choice. It's the only Computer-Aided Writing Tool that
+gets past any AI detector. The [GRAMMAR] button lets you toggle
+Grammarly on and off. Word of advice: when you're not using Grammarly,
+leave it turned off.
+  
 The file name is a button too. A name longer than 18
 characters is shortened at the front, as in
 `...src/fib.lisp`. A click on the name opens a window with the
@@ -160,8 +182,6 @@ The whole status line is written in Scheme, in
 > 
 >     (set! *mode-line-menu*
 >           (append *mode-line-menu* '(("KILL" "C-x k"))))
-
-![The help page, `C-h`](figs/sbemacs-help.png)
 
 ### Basic commands.
 
@@ -201,7 +221,7 @@ down and press `x`, then `κ`
 > `C-x C-w` – write file with new name.  
 > `C-x C-s` – save file.  
 > `C-x s` – save every modified file, asking first.  
-> `C-x C-c` – exit SBEmacs.  
+> `C-x C-c` – exit Browsered.  
 > `C-x i` – insert file at the cursor.  
 > `C-x ?` – describes a key stroke.  
 > `C-x @` – shell command. After `C-x @`,
@@ -233,7 +253,8 @@ find commands that cope with this situation.
     > `C-x 1` – close the other window.  
     > `C-x 0` – close the cursor window.  
     > `C-x ^` – make the cursor window taller.
-
+    > `C-^`   - make the cursor window taller.
+      
   - `Esc` κ – Press the `Esc` key and let go of it,
     then press the `κ` key.
     
@@ -250,11 +271,12 @@ find commands that cope with this situation.
     Profiles, Keys and set *Left Option key* to *Esc+*.
     The right Option key may remain *Normal* for entering Mac symbols.
     
-    > `M-b` – move backward one word.  
-    > `M-f` – move forward one word.  
-    > `M-g` – go to the line given in the minibuffer.  
-    > `M-n` – activate the next buffer.  
-    > `M-r` – query replace. `M-%` does the same.
+    > `M-b`   – move backward one word.  
+    > `M-f`   – move forward one word.  
+    > `M-g`   – go to the line given in the minibuffer.  
+    > `C-x →` – activate the next buffer.  
+    > `C-x ←` - activate the previous buffer.
+    > `M-r`   – query replace. `M-%` does the same.
 
 ### The mouse.
 
@@ -391,13 +413,10 @@ the `κ` key.
 
 ### Calculations with Lisp.
 
-Browsered
-offers a Lisp dialect to perform calculations
-and text processing. Let us assume that you
-want to find how many students graduate
-from medical schools in California. You
-press `Esc``:` and Browsered
-will prompt you for a Lisp expression.
+Browsered offers a Lisp Scheme dialect to perform calculations and
+text processing. Let us assume that you want to find how many students
+graduate from medical schools in California. You press `Esc``:` and
+Browsered will prompt you for a Lisp expression.
 
 > `> (+ 190 180 170 160 120 100 100 90)``Enter`
 
@@ -427,14 +446,11 @@ other arithmetic function too.
     
     > `Esc``:`  
     > `> (/ 1 2 4)``Enter`  
-    > 1/8
+    > 0.125
     
     The above operation performed the chain
-    division `1/2/4`. Common Lisp keeps the exact
-    fraction `1/8`. If you want a decimal number,
-    write one of the arguments as a decimal: `(/ 1.0 2 4)`
-    gives `0.125`.
-
+    division `1/2/4`.
+    
   - Subtraction has the syntax shown below.
     
     > `Esc``:`  
@@ -451,27 +467,18 @@ other arithmetic function too.
     > `> (/ (+ 190 180 170 160 120 100 100 90) 8.0)``Enter`  
     > 138.75
 
-In FemtoEmacs, the predecessor of Browsered, the Lisp prompt was
-`Esc``;`. In Browsered,
-as in GNU Emacs, `Esc``;` inserts a comment, and the Lisp
-prompt is `Esc``:`.
 
 ### Command execution.
 
-When you press
-shortcut keys, Browsered calls a command written in
-C or in Lisp. You can get a complete list of all
-Browsered keybindings by pressing `C-h`.
+When you press shortcut keys, Browsered calls a command written in C
+or in Scheme. You can get a complete list of all Browsered keybindings
+by pressing `C-h`.
 
-There are commands that are not associated to
-shortcut keys.
-For instance, the `undo-status` command
-tells how many steps of undo the buffer keeps.
-Press `Esc``x`
-and type `undo-status` at the
-minibuffer prompt. The `Tab` key completes the name of
-the command. Below you will find a fairly complete list
-of Browsered commands.
+There are commands that are not associated to shortcut keys. For
+instance, the `undo-status` command tells how many steps of undo the
+buffer keeps. Press `Esc``x` and type `undo-status` at the minibuffer
+prompt. The `Tab` key completes the name of the command. Below you
+will find a fairly complete list of Browsered commands.
 
 ### Moving.
 
@@ -621,40 +628,43 @@ A text editor, like Emacs or Browsered, has three components:
 
 3. A scripting language for customizing the Editor.
 
-There is a large choice of frontends. Some frontends
+There is a wide choice of frontends. Some frontends
 work with a raster graphics image, which is a dot matrix
 data structure that represents a grid of pixels.
 There are also frontends that are specialized in
 showing letters and other characters via an appropriate
-display media. The latter sort of frontend is called
+display medium. The latter sort of frontend is called
 text-based user interfaces, while the former is called
-graphical user interface, or GUI for short.
+Graphical user interface, or GUI.
 
 Text-based user interfaces are more
-confortable on the eyes, since they provide
-sharper and crisp alphabetical letters.
+comfortable on the eyes, since they provide
+sharper and crisper alphabetical letters.
 On the other hand, GUI allows for font
-customization. Browsered offers both. In a text terminal,
-it uses ncurses, which is a text-based user interface.
+customization. Schememax, the sister project of Browsered,
+offers both. In a text terminal, it uses ncurses,
+which is a text-based user interface.
 In a window of its own, it uses SDL2, a library that
 draws on a grid of pixels, and SDL2\_ttf, which renders
 TrueType fonts. The two frontends are compiled into two
 separate libraries, so a person who only works in the
 text terminal never needs SDL2.
 
-The scripting language is Common Lisp, as implemented by
-SBCL. In fact, SBCL is the program that you run: it loads the
-small editor core, written in C, and then the Lisp scripts.
+Browsered itself runs in a browser to facilitate
+interaction of web applications, such as Grammarly
+and NAIA, a medical AI.
 
-In this chapter, you will install all these pieces.
-I have to say this again: An installation
-task has so many details that, unless you
-are an engineer yourself,
-ask for help from a computer expert.
-If you never used a text terminal, read
-Chapter [Shell](#shell) first.
+The scripting language is a fast implementation of Scheme inspired
+on Dybvig's Chez Scheme.
+
+In this chapter, you will install all these pieces. Unfortunately, I
+have to say this: An installation task has so many details that,
+unless you are an engineer yourself, ask for help from a computer
+expert. If you never used a text terminal, read Chapter
+[Shell](#shell) first.
 
 ## Windows: the setup program
+-- Claude, rewrite this section
 
 If you use Windows and only want to run the Editor, you can skip
 the rest of this chapter. Download the setup program:
@@ -688,6 +698,7 @@ other systems (section [Executing Lisp programs](#executing-lisp-programs)). To 
 *Uninstall*; your `.sbemacs` folder stays.
 
 ### How the setup program is made.
+-- Claude, rewrite this section
 
 Windows users should
 not have to install compilers, and they do not: GitHub does the
@@ -716,6 +727,7 @@ runs under Wine:
 The result is in `build/windows`.
 
 ## Cloning the GitHub repository
+-- Claude, rewrite this section
 
 The sources of Browsered are kept on GitHub, a site that stores
 programs together with the history of all their changes.
@@ -767,109 +779,8 @@ bring the changes:
 > 
 >     ~/csand/sbemacs$ git pull
 
-## Branches
-
-A repository can keep more than one version of a program at
-the same time. Each version is called a branch. The
-Browsered repository (still called `Femto-Emacs` on GitHub)
-has three branches:
-
-  - `master` – FemtoEmacs, the predecessor of Browsered (2016),
-    with femtolisp.
-
-  - `sbcl` – Browsered, the Editor described in this text,
-    for Linux, Macintosh and Windows.
-
-  - `windows` – Browsered and the script that makes its
-    setup program for Windows (section [Windows: the setup program](#windows-the-setup-program)).
-
-The `git branch -a` command lists the branches; an
-asterisk marks the one whose files you have in the folder.
-To switch to another branch, use `git switch`:
-
-> 
-> 
->     ~/csand/sbemacs$ git branch -a
->     * master
->       remotes/origin/master
->       remotes/origin/sbcl
->       remotes/origin/windows
->     ~/csand/sbemacs$ git switch sbcl
->     Switched to a new branch 'sbcl'
->     ~/csand/sbemacs$ git switch windows
->     Switched to a new branch 'windows'
->     ~/csand/sbemacs$ git switch sbcl
->     Switched to branch 'sbcl'
-
-When you switch, git replaces the files of the folder with
-the files of the chosen branch. Therefore, if you have changed
-a file, git refuses to switch until you save your work
-with `git commit`, or put it aside with `git stash`.
-Old versions of git do not know `git switch`; use
-`git checkout sbcl` instead.
-
-For the rest of this chapter, Nia stays in the `sbcl` branch.
-If you use Windows and only want to run the Editor, you need no
-branch at all: use the setup program of section [Windows: the setup program](#windows-the-setup-program).
-
-## Installing SBCL
-
-SBCL, Steel Bank Common Lisp, is a free compiler for the Common Lisp
-language. Users of Browsered are supposed to install it, because
-Browsered is a program that SBCL runs. Any recent version works.
-
-### MAC OS-X.
-
-The easiest way is Homebrew, a package
-manager for the Macintosh (see section [Package managers](#package-managers)).
-If you do not have Homebrew yet, the instructions are at
-`https://brew.sh`. Then:
-
-> 
-> 
->     ~$ brew install sbcl
-
-### Linux.
-
-Use the package manager of your distribution:
-
-> 
-> 
->     ~$ sudo apt-get install sbcl       # Debian, Ubuntu
->     ~$ sudo dnf install sbcl           # Fedora
-
-### Windows.
-
-You need SBCL only to build Browsered yourself;
-the setup program of section [Windows: the setup program](#windows-the-setup-program) has it inside.
-Download the installer of the most recent
-64-bit version from
-`https://www.sbcl.org/platform-table.html`,
-double-click it and follow the instructions.
-
-### Checking.
-
-Whatever your system, check that the
-terminal finds SBCL:
-
-> 
-> 
->     ~$ sbcl --version
->     SBCL 2.5.9
-
-If you type `sbcl` alone, you get the Lisp prompt,
-where you can try the arithmetic of Chapter 1. The
-`(exit)` expression takes you back to the shell.
-
-> 
-> 
->     ~$ sbcl
->     * (+ 190 180 170 160 120 100 100 90)
->     1110
->     * (exit)
->     ~$
-
 ## ncurses
+-- Claude, rewrite this section, if necessary.
 
 Computers need a tool to make communication
 with users possible. That tool is
@@ -889,6 +800,7 @@ the operating systems came with old versions. Today, this is
 seldom necessary.
 
 ### MAC OS-X.
+-- Claude, rewrite this section
 
 The Macintosh comes with ncurses, and
 Browsered uses it. The Xcode command line tools of
@@ -905,6 +817,7 @@ To check the version:
 If `xcrun` complains, run `xcode-select --install` again.
 
 ### Linux.
+-- Claude, rewrite this section
 
 The ncurses library is certainly installed,
 since many programs use it, but the files that the C compiler
@@ -925,6 +838,7 @@ install it:
 >     ~$ sudo dnf install ncurses-devel pkgconf          # Fedora
 
 ### Windows.
+-- Claude, rewrite this section. Consider compiling the application on GitHub.
 
 If you build Browsered from the sources, you
 need MSYS2 (`https://www.msys2.org`), a collection of Unix
@@ -936,291 +850,40 @@ the compiler, make, ncurses and pkg-config:
 >     $ pacman -S make mingw-w64-x86_64-gcc mingw-w64-x86_64-ncurses \
 >                 mingw-w64-x86_64-pkgconf
 
-## SDL2 and SDL2\_ttf
-
-### What they are.
-
-A text terminal shows only characters, one
-per cell of a grid. A window of its own lets Browsered choose fonts and
-colours freely, but the program must then draw every letter itself, pixel
-by pixel, and talk to the operating system to open the window and to read
-the keyboard and the mouse. Each operating system does these things in its
-own way: Cocoa on the Macintosh, X11 or Wayland on Linux, Win32 on
-Windows. Instead of writing the Editor three times, Browsered uses SDL2.
-
-SDL2, the Simple DirectMedia Layer, is a library that offers one set of
-functions for all these systems: open a window, draw rectangles and
-images, receive key presses and mouse clicks. Many games are built on
-it. SDL2 does not know how to draw letters, though. That is the job of
-SDL2\_ttf, a companion library that reads TrueType fonts (the
-`.ttf` and `.ttc` files of your system) and turns each letter
-into a small image that SDL2 can paint.
-
-Remember that a library is a file of compiled C functions that other
-programs use. To build a program on top of a library, the C compiler needs
-two things: the header files (`SDL.h`, `SDL_ttf.h`), which
-describe the functions, and the library itself
-(`libSDL2.dylib`, `libSDL2.so` or `SDL2.dll`). On Linux,
-the headers come in a separate package, whose name ends in `-dev` or
-`-devel`.
-
-SDL2 and SDL2\_ttf are optional. If you only use Browsered in a text
-terminal, you can skip this section.
-
-### pkg-config.
-
-How does `make` find the headers and the
-libraries? It asks `pkg-config`, a small program that knows where each
-installed library lives. For instance:
-
-> 
-> 
->     ~$ pkg-config --modversion sdl2 SDL2_ttf
->     2.30.0
->     2.22.0
->     ~$ pkg-config --cflags --libs sdl2 SDL2_ttf
->     -I/opt/homebrew/include/SDL2 -L/opt/homebrew/lib -lSDL2_ttf -lSDL2
-
-The first command prints the versions, which proves that both libraries
-are installed and that `pkg-config` finds them. The second prints the
-options that `make` hands to the C compiler. If the first command
-answers *Package sdl2 was not found*, install the libraries as shown
-below. If it answers *command not found*, `pkg-config` itself is
-missing; install it too.
-
 ### MAC OS-X.
-
-Install Homebrew first, as explained in
-section [Package managers](#package-managers). Then:
-
-> 
-> 
->     ~$ brew install sdl2 sdl2_ttf pkg-config
-
-Homebrew installs everything under `/opt/homebrew` (or
-`/usr/local` on older Intel Macintosh computers), and tells
-`pkg-config` where. You do not need `sudo`.
+-- Claude, write this section
 
 ### Linux.
-
-Install the development packages, which bring the
-headers together with the libraries:
-
-> 
-> 
->     ~$ sudo apt-get install libsdl2-dev libsdl2-ttf-dev pkg-config  # Debian, Ubuntu
->     ~$ sudo dnf install SDL2-devel SDL2_ttf-devel pkgconf          # Fedora
->     ~$ sudo pacman -S sdl2 sdl2_ttf pkgconf                        # Arch
-
-Browsered needs a font. Most distributions come with the DejaVu fonts;
-if letters are missing in the window, install them
-(`sudo apt-get install fonts-dejavu`).
+-- Claude, write this section
 
 ### Windows.
 
-If you install Browsered with the setup program
-(section [Windows: the setup program](#windows-the-setup-program)), SDL2 and SDL2\_ttf come with it, and you
-have nothing to do. If you build Browsered yourself, install them in the *MSYS2
-MINGW64* shell:
-
-> 
-> 
->     $ pacman -S mingw-w64-x86_64-SDL2 mingw-w64-x86_64-SDL2_ttf \
->                 mingw-w64-x86_64-pkgconf
-
-The files `SDL2.dll` and `SDL2_ttf.dll` must then be where
-Windows finds them: in the folder of `sbemacs.exe`, or in the MSYS2
-`mingw64\bin` folder if it is in the `PATH`.
-
-### Build again.
-
-The graphical frontend is compiled only when
-`make` finds SDL2. If you ran `make` before installing SDL2, it
-printed this note, and built the terminal version only:
-
-> 
-> 
->     note: SDL2/SDL2_ttf not found, built the terminal version only
-
-After installing SDL2, build and install again:
-
-> 
-> 
->     ~/csand/sbemacs$ make
->     ~/csand/sbemacs$ sudo make install
-
-To make sure that the graphical frontend exists, look for its library next
-to the program:
-
-> 
-> 
->     ~/csand/sbemacs$ ls libsbemacs-*
->     libsbemacs-gui.dylib   libsbemacs-term.dylib
-
-On Linux the names end in `.so`; on Windows, in `.dll`.
-
 ### Try it.
+-- Claude, write this section
 
-> 
-> 
->     ~$ sbemacs --gui notes.md
-
-If a window opens, everything is in place. If Browsered says
-*cannot open a window here, using the terminal*, either the graphical
-library was not built (go back to *Build again*) or there is no screen
-to open a window on: for instance, you are logged in a remote machine
-through `ssh`. In that case the terminal version is the right one.
-
-### Fonts and colours.
-
-Browsered looks for a monospaced font among
-the usual ones of each system (Menlo and Monaco on the Macintosh, DejaVu
-Sans Mono and Liberation Mono on Linux, Consolas on Windows). To choose
-another one, give the path of its file in `~/.sbemacs/init.lisp`:
-
-> 
-> 
->     (setf *gui-font* "/Library/Fonts/JetBrainsMono-Regular.ttf")
->     (setf *gui-font-size* 16)
->     (setf *gui-theme* :light)        ; or :dark, the default
-
-In the window, `C-+` and `C--` (or `Cmd``+` and
-`Cmd``-` on the Macintosh) make the letters larger or smaller.
 
 ## make and sudo make install
+-- Claude, write this section.
 
-The editor folder contains
-many files in the C computer language, and many in Lisp.
-In order to become usable, these files
-must be compiled into a set of libraries
-containing instructions written in a
-language that the computer understands.
-You do not need any knowledge of C to
-perform the translation to machine
-language. All instructions in the
-batch job for performing the compilation
-are written in `Makefile`. Enter the folder and type
-`make`:
-
-> 
-> 
->     ~/csand/sbemacs$ git switch sbcl
->     ~/csand/sbemacs$ make
->     ~/csand/sbemacs$ make test
->     112/112 tests passed
-
-The `make` command produces three files:
-
-  - `libsbemacs-term` – the editor core with the ncurses frontend.
-
-  - `libsbemacs-gui` – the editor core with the SDL2 frontend,
-    if SDL2 is installed.
-
-  - `sbemacs` – the program itself, which SBCL saved together
-    with the compiled Lisp scripts.
-
-On the Macintosh, the libraries have the `.dylib` extension;
-on Linux, `.so`; on Windows, `.dll`. The `make test`
-command is optional: it checks that the Lisp side works.
-
-You can already try the Editor from inside the folder. Remember
-that the dot indicates the current directory. For instance,
-the `./sbemacs` command means: execute the `sbemacs` file
-present in the current directory.
-
-> 
-> 
->     ~/csand/sbemacs$ ./sbemacs samples/fib.lisp
-
-Installation is achieved by copying the
-compiled files to `/usr/local/`:
-
-> 
-> 
->     ~/csand/sbemacs$ sudo make install
-
-The installation requires that the
-system copy files to the `/usr/local/`
-folder. However, you must give special
-permission for this operation to be performed,
-otherwise the possibility remains open for
-a virus to make similar copies
-in critical folders.
-The `sudo`
-command informs the machine that you
-are a superuser. To avoid being tricked
-by a virus or an unauthorized user,
-the machine asks for the password,
-and if you type it correctly,
-the system installs Browsered: the program goes to
-`/usr/local/lib/sbemacs/`, and the commands
-`sbemacs` and `sbemacs-gui` to `/usr/local/bin/`.
-
-Only `sudo make install` needs `sudo`. Never type
-`sudo make`: the files that a superuser creates belong to
-the superuser, and the next `make` cannot overwrite them.
-If you prefer not to use `sudo` at all, install Browsered in
-your home folder:
-
-> 
-> 
->     ~/csand/sbemacs$ make install PREFIX=$HOME/.local
-
-and make sure that `~/.local/bin` is in your search path
-(in the `~/.zshrc` or `~/.bashrc` file):
-
-> 
-> 
->     export PATH="$HOME/.local/bin:$PATH"
-
-Every time you bring a new version with `git pull`,
-repeat `make` and `sudo make install`. However,
-if you only change a Lisp script, you do not need to build anything:
-see section [Executing Lisp programs](#executing-lisp-programs).
+The editor folder contains many files in the C computer language, and
+many in Lisp. In order to become usable, these files must be compiled
+into a set of libraries containing instructions written in a language
+that the computer understands. You do not need any knowledge of C to
+perform the translation to machine language. All instructions in the
+batch job for performing the compilation are written in `Makefile`.
+Enter the folder and type `make`:
 
 ## Running Browsered
 
-In a text terminal, type `sbemacs` followed by the name of the
+In a text terminal of macOS, type `Browsered.command` followed by the name of the
 file you want to edit:
 
 > 
 > 
->     ~$ sbemacs fib.lisp
-
-To open the Editor in a window of its own, add the `--gui`
-option, or use the `sbemacs-gui` command:
-
-> 
-> 
->     ~$ sbemacs --gui fib.lisp
->     ~$ sbemacs-gui fib.lisp
-
-If a window cannot be opened, for instance when you are logged
-in a remote machine, Browsered says so and works in the terminal.
-Other options:
-
-> `-q` – do not load your configuration file,
-> `~/.sbemacs/init.lisp`.  
-> `--no-mouse` – leave the mouse to the terminal.  
-> `--version` – print the version and exit.
-
-![`sbemacs –gui fib.lisp`: a region selected with
-the mouse, and the menu of `C-c r`](figs/sbemacs-gui.png)
-
-In the window, the usual shortcuts of the Macintosh work too:
-`Cmd``C` copies, `Cmd``X` cuts, `Cmd``V`
-pastes, `Cmd``Z` undoes and `Cmd``Q` quits.
-`C-+` and `C--` make the font larger or smaller.
-In `~/.sbemacs/init.lisp`, you can choose the font, its size and
-a light or dark theme:
-
-> 
-> 
->     (setf *gui-font-size* 16)
->     (setf *gui-theme* :light)      ; or :dark
->     (setf *gui-font* "/Library/Fonts/Menlo.ttc")
+>  ~/claude-sandbox/browsered$ ./Browsered.command
 
 ## Installing Claude and Codex
+-- Claude, rewrite this section
 
 Browsered can ask Claude, an artificial intelligence made by
 Anthropic, for help with the text you are editing. The Editor does
@@ -1431,91 +1094,30 @@ from there, `C-c r` asks Claude, and `C-c g` asks ChatGPT.
 Any other key takes Nia back to her file and closes the windows of
 the assistants, except the discussion.
 
-## Executing Lisp programs
+## Executing Scheme programs
 
 There are many ways of executing Lisp in Browsered. They all
 evaluate the expressions in the same Common Lisp, the one that
 runs the Editor. Errors are reported on the message line; they
 never take the Editor down.
 
-### The Lisp prompt.
 
-As you learned in Chapter 1,
-`Esc``:` prompts for an expression and shows its value.
-
-### Evaluating a definition.
-
-Nia writes a program in a
-file, for instance `fib.lisp`:
-
-> 
-> 
->     (defun fib (n)
->       (if (< n 2)
->           n
->           (+ (fib (- n 1)) (fib (- n 2)))))
-
-With the cursor after the last parenthesis, she presses
-`C-x C-e`. Browsered evaluates the expression before the cursor
-and shows `FIB` on the message line, which means that
-the function is defined. If the cursor is anywhere inside the
-definition, `C-M-x` has the same effect. Now she can call
-the function from the Lisp prompt:
-
-> `Esc``:`  
-> `> (fib 20)``Enter`  
-> 6765
-
-She could also type `(fib 20)` in the file and press `C-x C-e`
-after it. The `Esc ]` command evaluates the expression
-around the cursor and inserts the value into the text.
-
-### The Editor from Lisp.
+### The Editor from Scheme.
 
 The expressions can control the
 Editor. For instance, `(insert "Hello")` inserts a text at the
 cursor, `(goto-line 10)` moves the cursor, `(buffer-filename)`
 returns the name of the file.
 
-### Running a program in SBCL.
-
-A program that reads files
-or prints a lot is better run by SBCL itself, outside the Editor.
-Nia adds a line that prints a result at the end of `fib.lisp`,
-
-> 
-> 
->     (format t "fib(25) = ~a~%" (fib 25))
-
-saves the file, and presses `Esc``!` (or `C-x @`) to
-run a shell command:
-
-> `sbcl --script fib.lisp``Enter`
-
-Browsered shows the output in a buffer of its own:
-
-> `fib(25) = 75025`
-
 ### Configuration.
+-- Claude, rewrite this section.
 
 When Browsered starts, it loads
 `~/.sbemacs/init.lisp`, if the file exists. That is where Nia
 puts her own commands and keybindings:
 
-> 
-> 
->     (defun insert-date ()
->       (multiple-value-bind (s m h d mo y) (get-decoded-time)
->         (declare (ignore s m h))
->         (insert (format nil "~D-~2,'0D-~2,'0D" y mo d))))
->     
->     (global-set-key "C-c d" 'insert-date)
->     (set-color :comment 244)        ; grey comments
-
-Keys are written as in GNU Emacs: `"C-c d"`, `"M-o"`,
-`"C-M-y"`, `"F1"`.
-
 ### Scripts.
+-- Claude, rewrite this section
 
 Syntax colouring, indentation, keybindings and
 the assistants are Lisp scripts, in the `lisp/` folder of the
@@ -1525,135 +1127,9 @@ these files, she presses `C-x C-r`, and Browsered reloads what
 changed; there is no need to run `make` again. For instance, a
 new language is a file with two forms:
 
-> 
-> 
->     (define-language "Go"
->       :extensions '(".go")
->       :line-comment "//"
->       :block-comment '("/*" . "*/")
->       :keywords '("func" "package" "import" "return" "if" "else"))
->     
->     (define-indentation "Go" :style :c :width 4)
-
 Chapter [Teaching Claude: SKILL.md](#teaching-claude-skillmd) explains how to ask Claude Code to
 write such scripts for you.
 
-## Editing and running Nim
-
-Nim mode lets Nia edit, compile and run a program without leaving
-Browsered. It provides syntax coloring, two-space indentation, comments,
-and navigation between procedures, functions, iterators, templates and
-macros. The terminal and GUI versions use the same Lisp callbacks.
-
-### Installation and loading.
-
-Install Nim and make sure its `nim` command is on the path seen by
-Browsered. Press `M-!`, type `nim --version` and press
-`C-c s` or click SEND. The lower window displays the compiler
-version. `C-x 1` returns to the file. If macOS blocks a downloaded
-Nim executable, approve the trusted compiler with Open Anyway in System
-Settings, Privacy & Security.
-
-Build and install the updated Browsered:
-
-    make
-    sudo make install
-
-Restart the Editor. Files ending in `.nim`, `.nims` and
-`.nimble` automatically use Nim mode. Its implementation is
-`lisp/modes/nim-mode.lisp`. To reload it, use `M-x nim-mode`.
-Alternatively, run `M-x load-mode`, enter `nim` at the Load
-mode prompt, and press Enter. TAB completes names. Mode lookup starts
-in the Editor’s modes directory, independently of the shell directory.
-A personal copy in `~/.sbemacs/modes/nim-mode.lisp` takes precedence
-when explicitly loading the mode.
-
-### Writing a program.
-
-Press `C-x C-f` and enter `~/wrk/hi.nim`. The folder must
-already exist. Write:
-
-    import os
-    
-    echo "Hello, ", paramStr(1)
-
-SAVE or `C-x C-s` saves the source. TAB indents the current line;
-repeated TAB cycles alternative levels. Enter indents the new line.
-The `#` button or `M-;` comments or uncomments a line or
-selected region. `C-x C-i` indents a selected region.
-
-Coloring recognizes nested comments, documentation comments, raw and
-triple-quoted strings, backtick identifiers, and numeric suffixes. It
-handles unfinished code while Nia types. Indentation is an editing aid,
-not a complete Nim parser. Macros can introduce syntax beyond its rules;
-use TAB to choose another level when necessary.
-
-### Build and Run.
-
-Click MORE and select Build or Run. Use arrows and Enter, or click the
-option and then RUN. The named commands are:
-
-    M-x nim-build                 save and compile
-    M-x nim-run                   save, compile and run
-    M-x nim-next-definition       next routine definition
-    M-x nim-previous-definition   previous routine definition
-
-Build and Run work on `.nim` files; coloring also covers
-`.nims` and `.nimble`. Both commands save the current source
-before compiling and stop if saving fails. Build calls `nim c`.
-Run calls `nim c -r` and reads arguments in the minibuffer.
-For `hi.nim`, enter `Edward` at
-`Nim program arguments:`. The output window shows:
-
-    $ nim c -r --hints:off 'hi.nim' Edward
-    Hello, Edward
-
-The command runs in the source file’s directory. Compiler diagnostics
-and program output appear below the source; a failed command also shows
-its exit status. `C-x 1` closes the output window and returns to
-the source. Edit and use Run again to test the changed program.
-
-### Using the shell.
-
-For additional compiler options, press `M-!` or `C-x @`
-from the source window and write:
-
-    nim c -r --hints:off --nimcache:xx hi.nim Edward
-
-SEND or `C-c s` executes the command. Each submission starts a
-new shell: `cd` does not change the directory of the next
-submission. On macOS and Linux, put dependent commands together:
-
-    cd "$HOME/wrk" && nim c -r hi.nim Edward
-
-Entered lines are joined as command continuations, not separate shell
-commands. Windows uses `cmd.exe` and its own quoting conventions.
-
-Execution is synchronous: Browsered waits for the command to finish.
-Its shell capture supplies empty standard input and cannot accept
-interactive keystrokes or passwords. Supply arguments, a file, or a
-pipe. For example, on macOS or Linux:
-
-    printf '3 4 +\n' | ./rdwrt
-
-Arguments entered at the Nim prompt are shell text; quote filenames
-containing spaces. The output buffer does not interpret terminal colors
-or cursor-control sequences.
-
-### The Nim tutorial.
-
-The nimacros repository supplies the mode and installation instructions
-in `sbemacs/`. Hello World, State Machines and Shell are the first
-three chapters in `nimacros/chaps/nimdoc1.md`. They now use Browsered
-for editing and execution while retaining the author’s explanations.
-The existing tutorial PDF has not been regenerated. These local changes
-must be published before GitHub shows the updated instructions:
-
-> <https://github.com/FemtoEmacs/nimacros>
-
-The compiler tests ran Hello World, Zeller’s congruence, and both
-Fibonacci implementations. Zeller, run inside Browsered with arguments
-`2016 8 31`, displayed `3`, the number for Wednesday.
 
 # Shell
 
@@ -2339,19 +1815,15 @@ dialect is not standard lisp, being used
 only by the GNU Emacs editor and its
 derivatives.
 
-Common Lisp was chosen
+Chez Scheme  was chosen
 as the extension language
 for Browsered for the following reasons:
 
-1. SBCL is open source.
+1. It is open source.
 
-2. Common Lisp is an ANSI standard. One can use
-    classical Common Lisp tutorials and books to learn
-    how to configure and customize Browsered.
+2. Chez Scheme is fast.
 
-3. SBCL is fast.
-
-4. SBCL runs on Linux, Macintosh and Windows.
+3. Chez Scheme runs on Linux, Macintosh and Windows.
 
 The present text is based on *An introduction to femtolisp*,
 by Eduardo Costa and Vernon Sipple.

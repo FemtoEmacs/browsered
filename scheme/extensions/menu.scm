@@ -223,6 +223,49 @@ the width.  The encoded pieces, or #f for the C core's own mode line."
           (loop (+ k 1) found))
         found)))
 
+;; Tool windows (the assistants', the shell's) are made by splitting the
+;; window of the file they were called from, and closing them deletes them:
+;; their rows go back to the window above, and the screen is as it was.
+(define (select-window-showing name)
+  "Select a window that shows buffer NAME: #t, or #f when none does."
+  (let loop ((k 0))
+    (cond ((string=? (get-buffer-name) name) #t)
+          ((< k (window-count)) (other-window) (loop (+ k 1)))
+          (else #f))))
+
+(define (go-to-file-window name)
+  "Select the window of buffer NAME, or show NAME in this window."
+  (unless (select-window-showing name) (select-buffer name)))
+
+(define (open-window-below buffer)
+  "Show BUFFER in a new window below the selected one (half of its rows)
+and select it.  A window too small to split becomes the only one first."
+  (when (< (window-rows) 7) (delete-other-windows))
+  (split-window)
+  (other-window)
+  (select-buffer buffer))
+
+(defcommand (close-tool-window)
+  "C-c q: close the window of the assistant, the shell or the help page
+(as its [CLOSE] does) and go back to the file; the other windows are as
+they were before it opened."
+  (let ((here (get-buffer-name))
+        (shell-shown (lambda () (or (buffer-shown-p "*shell-command*") (buffer-shown-p "*output*")))))
+    (cond ((and (bound? 'shell-buffer-p) (shell-buffer-p here)) (shell-close))
+          ((and (bound? 'help-page-p) (help-page-p)) (help-close))
+          ((and (bound? 'assistant-close)
+                (or (assistant-buffer-p here) (discussion-buffer-p here)))
+           (assistant-close))
+          ((and (bound? 'shown-assistant-buffer) (shown-assistant-buffer)) (close-assistant-windows))
+          ((and (bound? 'shell-close) (shell-shown)) (shell-close))
+          ((and (bound? 'close-discussion-window)
+                (or (buffer-shown-p *claude-discussion-buffer*) (buffer-shown-p *codex-discussion-buffer*)))
+           (close-discussion-window))
+          (else (message "No assistant, shell or help window to close")))
+    #t))
+
+(global-set-key "C-c q" 'close-tool-window)
+
 (define (call-in-window-of buffer f)
   "Call F with BUFFER current: in a window that shows it if there is one,
 otherwise in this window for a moment.  Its value."
@@ -507,11 +550,11 @@ Each one then offers, in this window:
    d   a discussion that stays open; C-c t puts the code under the
        cursor in your file
 
-C-x 1 closes this window.")
+C-c q (or [CLOSE]) closes this window; the other windows stay.")
 
 (defcommand (ai-help)
   "What the assistants (Claude, Codex) can do and how to call them."
   (show-in-assistant-window "AI help" *ai-help-text*)
-  (set-buffer-hint *assistant-buffer* "C-c r Claude; C-c g Codex; C-x 1 close")
+  (set-buffer-hint *assistant-buffer* "C-c r Claude; C-c g Codex; C-c q close")
   (message "C-c r: ask Claude;  C-c g: ask Codex (ChatGPT)")
   #t)

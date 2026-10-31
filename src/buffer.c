@@ -180,6 +180,24 @@ void next_buffer()
 	associate_b2w(curbp,curwp);
 }
 
+/* C-x left: the buffer before this one (C-x right, C-x n: the one after) */
+void previous_buffer()
+{
+	buffer_t *bp, *prev = NULL;
+
+	assert(curbp != NULL);
+	assert(bheadp != NULL);
+	for (bp = bheadp; bp != NULL; bp = bp->b_next) {
+		if (bp->b_next == curbp || (curbp == bheadp && bp->b_next == NULL))
+			prev = bp;
+	}
+	if (prev == NULL || prev == curbp)
+		return;
+	disassociate_b(curwp);
+	curbp = prev;
+	associate_b2w(curbp,curwp);
+}
+
 char* get_buffer_name(buffer_t *bp)
 {
 	assert(bp->b_bname != NULL);

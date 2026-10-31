@@ -207,5 +207,5 @@ static builtinspec_t web_builtins[] = {
 	{NULL, NULL}
 };
 
-extern void web_fast_init(void);   /* web-fast.c */
-void web_scheme_init(void) { assign_global_builtins(web_builtins); web_fast_init(); }
+extern void web_hot_init(void);   /* web-hot.c */
+void web_scheme_init(void) { assign_global_builtins(web_builtins); web_hot_init(); }

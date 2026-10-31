@@ -146,6 +146,7 @@ The keys used most:
 | C-x C-e | evaluate the Scheme expression before the cursor |
 | C-x C-r | load the scripts again after editing them |
 | C-c r, C-c g | ask Claude, ask ChatGPT |
+| C-c q | close the assistant's or shell's window ([CLOSE]); the other windows stay as they were |
 | C-c m | command in the minibuffer; TAB completes paths, Enter runs it, C-g cancels |
 | C-x C-c | end the editor |
 
@@ -172,7 +173,7 @@ keeps it. It has two kinds of place.
 **HOME** (`~`, which is `/home/web_user`) is kept by the browser itself,
 in its own storage for this page. A file saved there (C-x C-w
 `~/notes.md`) is there the next time you open Browsered, in this browser
-on this computer. Your settings live there too, in `~/.schememax/`.
+on this computer. Your settings live there too, in `~/.browsered/`.
 
 **The folders of your computer.** A web page may not read your disk by
 itself: it sees only folders you hand it, and the browser asks you to
@@ -205,15 +206,17 @@ saves the buffer and downloads its file.
 
 ## Settings and scripts
 
-Your settings go where Schememax keeps them, in HOME:
+Your settings go in your own folder, `~/.browsered`, in HOME (inside the
+browser, so it has a name of its own, not Schememax's `~/.schememax`).
+It is made at the first start, with a short `init.scm`:
 
 | File | Loaded |
 |---|---|
-| `~/.schememax/init.scm` | last, at start-up |
-| `~/.schememax/languages/*.scm` | your own languages |
-| `~/.schememax/extensions/*.scm` | your own commands and keys |
+| `~/.browsered/init.scm` | last, at start-up |
+| `~/.browsered/languages/*.scm` | your own languages |
+| `~/.browsered/extensions/*.scm` | your own commands and keys |
 
-For example, in `~/.schememax/init.scm`:
+For example, in `~/.browsered/init.scm`:
 
 ```scheme
 (global-set-key "C-c d" 'insert-day)       ; Emacs key notation
@@ -223,8 +226,10 @@ For example, in `~/.schememax/init.scm`:
 (set! *option-is-meta* #f)                 ; Mac: Option types accents
 ```
 
-Open it with C-x C-f `~/.schememax/init.scm`, edit, save, and press C-x
+Open it with C-x C-f `~/.browsered/init.scm`, edit, save, and press C-x
 C-r: the scripts load again, with no rebuild and no reload of the page.
+Saving a file in a folder that does not exist yet
+(`~/.browsered/extensions/keys.scm`) asks to create the folder.
 
 The editor's own scripts are inside `Browsered.html`. To change them for
 everybody, change them in Schememax and bring them over (see
@@ -309,12 +314,17 @@ and Cancel; `M-x document-editor` opens the Grammarly-compatible document interf
 
 ## Speed
 
-Typing in a large LaTeX file takes about 4 ms a key, as in a program
-file (it took 127 ms). The colours of LaTeX and the rows of wrapped prose,
-worked out again at every key, run in C in the browser
-(`src/web-fast.c`), giving exactly what the Scheme in `tex.scm` and
-`markdown.scm` gives; `M-x scheme-highlighting` switches to the Scheme
-and back, to compare.
+The colours of a window and the rows of wrapped prose are worked out again
+at every key. The procedures that do it are Scheme -- `latex-highlight` in
+`scheme/languages/tex.scm`, `markdown-wrap-end` in `markdown.scm`, or your
+own -- and the first time one is used, Browsered compiles it with Schemer
+from its source, together with what it calls, and runs it on the editor's
+text where it lies. Typing in a large LaTeX file takes about 12 ms a key
+(interpreted, 127 ms). A highlighter you write for your own language, in
+`~/.browsered/languages/`, is compiled the same way after C-x C-r. Until
+the compiled one is ready, or if something in it cannot be compiled, the
+Scheme runs as before. `M-x hot-paths` says which run compiled;
+`M-x scheme-highlighting` switches to the interpreted Scheme and back.
 
 ## Textify a PDF (C-c f) and plots (C-c p)
 

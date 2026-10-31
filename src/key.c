@@ -46,6 +46,7 @@ command_t commands[] = {
 	{"list-undo", list_undos},
 	{"list-stats-undo", list_undo_stats},
 	{"next-buffer", next_buffer},
+	{"previous-buffer", previous_buffer},
 	{"next-line", down},
 	{"other-window", other_window},
 	{"previous-line", up},
@@ -134,6 +135,9 @@ keymap_t keymap[] = {
 	{"C-x i",     "insert-file"           , "\x18\x69", insertfile },
 	{"C-x k",     "kill-buffer"           , "\x18\x6B", killbuffer },
 	{"C-x n",     "next-buffer"           , "\x18\x6E", next_buffer },
+	/* as in Emacs: C-x and an arrow (the arrows' bytes, as left and right) */
+	{"C-x left",  "previous-buffer"       , "\x18\x1B\x5B\x44", previous_buffer },
+	{"C-x right", "next-buffer"           , "\x18\x1B\x5B\x43", next_buffer },
 	{"C-x o",     "other-window"          , "\x18\x6F", other_window },
 	{"C-x @",     "shell-command"         , "\x18\x40", i_shell_command },
 	{"mouse",     "mouse"                 , "\x1B\x5B\x4D", editor_mouse_event },

@@ -557,8 +557,9 @@ alone); on a text line, delete the blank lines after it."
 (define *fill-column* 70)
 
 (define (line-comment-start)
-  "The current language's line comment (\";;\" for Lisp), or #f."
-  (let* ((lang (language-for-file (or (buffer-filename) (get-buffer-name))))
+  "The line comment (\";;\" for Lisp) of the language at the cursor (a
+Markdown ```scheme block is Scheme), or #f."
+  (let* ((lang (language-at-point))
          (comments (and lang (language-line-comments lang))))
     (and (pair? comments)
          (let ((s (car comments))) (if (string=? s ";") ";;" s)))))
@@ -705,21 +706,26 @@ item keeps its marker, and the lines after it go under its text."
           ((and (region-active-p) (not (= (point) (mark))))
            (comment-region-lines comment))
           (else
+           ;; the text in the cursor's language: the buffer, or the block
+           ;; of a Markdown ``` fence; FROM is where it starts
            (let* ((ls (line-start)) (le (line-end ls))
-                  (text (buffer-substring 0 le))
-                  (language (language-for-file (or (buffer-filename) (get-buffer-name))))
-                  (found (line-comment-position text ls language))
+                  (place (language-place))
+                  (language (car place))
+                  (from (cdr place))
+                  (text (buffer-substring from le))
+                  (found (let ((at (line-comment-position text (- ls from) language)))
+                           (and at (+ at from))))
                   (single (if (string=? comment ";;") ";" comment))
                   (end (or found le))
                   (code-end (let loop ((i end))
-                              (if (and (> i ls) (memv (aref text (- i 1)) '(32 9)))
+                              (if (and (> i ls) (memv (aref text (- i from 1)) '(32 9)))
                                   (loop (- i 1)) i))))
              (cond ((= code-end ls)
                     (goto-char (or found le))
                     (unless found (insert comment " ")))
                    (else
                     (replace-region code-end end
-                      (make-string (max 1 (- *comment-column* (column-at text code-end))) #\space))
+                      (make-string (max 1 (- *comment-column* (column-at text (- code-end from)))) #\space))
                     (unless found (insert single " "))))
              (when found
                ;; Re-read the end after alignment changes the byte offsets.

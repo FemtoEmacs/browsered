@@ -27,11 +27,13 @@
 
 (define *gui-palettes*
   '((dark  (background . "#1d1f21") (foreground . "#c5c8c6") (cursor . "#f0c674")
-           (selection . "#373b41") (comment . "#969896") (keyword . "#b294bb")
+           (selection . "#373b41") (region . "#3a5f94") (region-text . "#ffffff")
+           (comment . "#969896") (keyword . "#b294bb")
            (string . "#b5bd68") (number . "#de935f") (brace . "#81a2be")
            (link . "#8abeb7"))
     (light (background . "#ffffff") (foreground . "#4d4d4c") (cursor . "#4271ae")
-           (selection . "#d6d6d6") (comment . "#8e908c") (keyword . "#8959a8")
+           (selection . "#d6d6d6") (region . "#9ec3f5") (region-text . "#1d1f21")
+           (comment . "#8e908c") (keyword . "#8959a8")
            (string . "#718c00") (number . "#f5871f") (brace . "#4271ae")
            (link . "#3e999f"))))
 
@@ -48,7 +50,8 @@
     (theme-face 'comment       (c 'comment))
     (theme-face 'block-comment (c 'comment))
     (theme-face 'string        (c 'string))
-    (theme-face 'region        (c 'foreground) (c 'selection))
+    ;; the selected region (C-SPC): a clear blue, not the mode line's grey
+    (theme-face 'region        (c 'region-text) (c 'region))
     (theme-face 'heading       (c 'brace) 'default 'bold)
     (theme-face 'emphasis      (c 'foreground) 'default 'italic)
     (theme-face 'strong        (c 'foreground) 'default 'bold)

@@ -14,7 +14,7 @@ Schememax's. What is Browsered's own:
 | `src/web.c` | the screen layer (screen.h) for the page: a grid of cells handed to the page; `screen_getch` waits for the page through Asyncify; a key value of -2 means "the page has Scheme to run" (`web_take_eval`) |
 | `src/web-main.c` | `main(void)`: passes the page's arguments to app.c's main (compiled as `app_main`), calls `web_ended` after C-x C-c; a `posix_spawnp` that fails (no processes in a page) |
 | `src/web-scheme.c` | `(web-call NAME ARG)`: Scheme calls `Module.browsered.call(NAME, ARG)` in the page and waits for its string (or #f) |
-| `src/web-fast.c` | `latex-highlight` and `markdown-wrap-end` in C, byte for byte (web.scm puts them in place in the browser; `tests/fast-test.js` compares them with the Scheme) |
+| `src/web-hot.c` | the editor's busiest Scheme compiled: `(web-hot-compile source)` and `(web-hot-call id a b c)`, the compiled program reading the editor's memory (web.scm `hot-of`, web/schemer.js `hotCompile`/`hot`) |
 | `src/web-layer.c` | for [GRAMMAR]: the selected window's rows and text, sent to the page after each redisplay |
 | `web/shell.html` | the page: the canvas, the hidden `#keys` text field, the `#notice` banner |
 | `web/browsered.js` | the page's side: painting, keys, mouse, clipboard, HOME in IndexedDB, folders of the computer, the APIs, banners, `?reset` |
@@ -84,15 +84,24 @@ Schememax's. What is Browsered's own:
 
 ## How things work, and what has bitten before
 
-- **Speed.** femtoscheme under Asyncify is several times slower than in
-  Schememax. Anything that runs at every key over the visible text must
-  not be interpreted: LaTeX colours took 127 ms a key, now 4 ms with
-  `src/web-fast.c`. The Scheme in tex.scm and markdown.scm stays the
-  reference: change it there first, then the C, and keep
-  `tests/fast-test.js` (colours and rows compared on the manual cut at
-  hundreds of places) passing. `M-x scheme-highlighting` switches back to
-  the Scheme for checking. Measure before optimizing: time from a typed
-  character to the next paint, in a large file, mid-file.
+- **Speed, and the Scheme stays the Scheme.** femtoscheme under Asyncify
+  is several times slower than in Schememax: LaTeX colours took 127 ms a
+  key interpreted. The user rejected a C copy of them (users write their
+  colouring in Scheme, not C): the procedure that runs at every key over
+  the visible text -- the language's highlighter, `markdown-wrap-end`,
+  whatever a user defined in their place -- is compiled by Schemer from its
+  own source the first time it is used (web.scm `hot-of`), with the
+  procedures it calls and the data it reads, and runs on the editor's memory
+  (`%mem-u8`; text and colours are passed as addresses). About 12 ms a key
+  in the LaTeX manual. Until it is ready, or if it cannot be compiled, the
+  Scheme runs interpreted. `tests/hot-test.js` compares compiled and
+  interpreted colours and rows on the manual cut at hundreds of places, and
+  checks that a user's highlighter is compiled too. `M-x hot-paths` and
+  `M-x scheme-highlighting` (interpreted, to compare). Make code faster in
+  Schemer, never by rewriting a script in C. Measure before optimizing:
+  time from a typed character to the next paint, in a large file, mid-file.
+  The forms are printed for Schemer atom by atom (`hot-write`): femtoscheme's
+  printer labels shared pieces (#0=), which Schemer's reader refuses.
 - **The `M-:`/`:` evaluator goes through Schemer**: some forms fail there
   ("car: expected cons" for named `let`, internal `define` in `begin`,
   procedure values passed to editor procedures). Tests that need such
@@ -116,6 +125,13 @@ Schememax's. What is Browsered's own:
   page has a key. The Asyncify stack (`ASYNCIFY_STACK_SIZE`, 4 MB) must
   hold femtoscheme's stack: a small one gives "RuntimeError: unreachable"
   when Scheme waits (web-call, reading a key from Scheme).
+- **Resizes and evaluations never reach the core as keys.** The core
+  answers SCR_KEY_RESIZE with a single window (Femto's resize_terminal),
+  which lost C-x 2's windows whenever the browser window changed size, and
+  -2 (Scheme from the page) used to be turned into that key. screen_getch
+  (web.c) now handles both itself: web_relayout (web-layer.c) keeps each
+  window's share of the rows, reframing the ones that shrink, then
+  web_redisplay. `tests/windows-resize-test.js`.
 - **Scheme in the page.** Never call into the WebAssembly program from a
   page event while it is suspended. To run Scheme from the page, use
   `runScheme(expr)`: it queues the expression and pushes -2, and
@@ -152,6 +168,16 @@ Schememax's. What is Browsered's own:
   keep Host, Origin and custom Content-Type checks for its endpoints.
   Safari/Firefox use helper-backed file handles when native folder APIs
   are absent. Test file operations only against disposable fixtures.
+
+- **The user's folder is `~/.browsered`**, in HOME (the browser's
+  storage), not Schememax's `~/.schememax`: web.scm replaces
+  `config-file` and `user-script-files`, and makes the folder with a short
+  `init.scm` at the first start (so TAB finds it); browsered.js moves an
+  older `~/.schememax` there before the editor starts. Users change the
+  editor there, with C-x C-r, never by rebuilding; `scheme/` is built into
+  the page and changes only with `make`. Saving into a missing folder asks
+  to create it (`save_buffer`, gap.c, as in Schememax).
+  `tests/user-init-test.js`.
 
 - **Exiting.** A page cannot close a tab it did not open: after C-x C-c,
   `Module.browsered.ended()` hides the editor and shows a closed screen.

@@ -6,7 +6,9 @@
 ;;;; command is written: one line, or several (Enter breaks the line).  C-c s
 ;;;; runs it; *output* then shows the command, as the shell got it, and
 ;;;; below it what the command printed, with its exit status when it
-;;;; failed.  C-x 1 closes the window; M-! again writes another command.
+;;;; failed.  C-c q (or [CLOSE], or C-x 1 there) closes the window and
+;;;; goes back to the file, with the other windows as they were; M-! again
+;;;; writes another command.
 ;;;;
 ;;;; A command of several lines is one command: each line break becomes
 ;;;; " \" and a break, the shell's continuation.  The command runs in the
@@ -57,12 +59,12 @@ C-c s runs it."
             (let ((file (buffer-filename)))
               (if file (let ((d (file-name-directory (absolute-path file)))) (if (string=? d "") (path.cwd) d))
                   (path.cwd)))))
-    (delete-other-windows)
-    ;; pressed again in *output*: the file goes back above
-    (when (and *shell-origin* (member (get-buffer-name) (list *shell-command-buffer* *shell-output-buffer*)))
-      (select-buffer *shell-origin*))
-    (split-window)
-    (other-window)
+    ;; the shell's window, if it has one already (M-! again in *output*);
+    ;; otherwise a new one below the file: the other windows stay
+    (unless (or (shell-buffer-p (get-buffer-name))
+                (select-window-showing *shell-command-buffer*)
+                (select-window-showing *shell-output-buffer*))
+      (open-window-below *shell-command-buffer*))
     (select-buffer *shell-command-buffer*)
     (erase-buffer)
     (message "Write the command (Enter for another line); [SEND] or C-c s runs it"))
@@ -113,17 +115,22 @@ window, with the command first."
     (show-shell-output command output code))
   #t)
 
-;;; Closing.  In these windows the cursor is in the shell window, so C-x 1
-;;; would keep it and close the file; here C-x 1 closes them and keeps the
-;;; file.  Elsewhere C-x 1 is what it always was.
+;;; Closing: C-c q (close-tool-window, menu.scm) or [CLOSE].  In these
+;;; windows C-x 1 would keep the shell and close the file, so here it closes
+;;; the shell too.  Elsewhere C-x 1 is what it always was.
 
 (define (shell-buffer-p name) (and (member name (list *shell-command-buffer* *shell-output-buffer*)) #t))
 
 (defcommand (shell-close)
-  "Close the shell command window; the file it was called from stays."
-  (delete-other-windows)
-  (when (and *shell-origin* (shell-buffer-p (get-buffer-name)))
-    (select-buffer *shell-origin*))
+  "C-c q or [CLOSE]: close the shell's windows and go back to the file it
+was called from; the other windows are as they were before M-!."
+  (let loop ((k 0))
+    (when (and (< k (* 2 (window-count))) (> (window-count) 1))
+      (if (shell-buffer-p (get-buffer-name)) (delete-window) (other-window))
+      (loop (+ k 1))))
+  (when (shell-buffer-p (get-buffer-name))
+    (select-buffer (or *shell-origin* "*scratch*")))
+  (when *shell-origin* (select-window-showing *shell-origin*))
   (clear-message-line)
   #t)
 
@@ -135,8 +142,8 @@ window, with the command first."
   #t)
 
 ;;; The windows' own buttons (menu.scm), clicked or typed alike
-(set-buffer-menu *shell-command-buffer* '(("SEND - C-c s" "C-c s") ("CLOSE - C-x 1" "C-x 1")))
-(set-buffer-menu *shell-output-buffer* '(("NEW - M-!" "M-!") ("CLOSE - C-x 1" "C-x 1")))
+(set-buffer-menu *shell-command-buffer* '(("SEND - C-c s" "C-c s") ("CLOSE - C-c q" "C-c q")))
+(set-buffer-menu *shell-output-buffer* '(("NEW - M-!" "M-!") ("CLOSE - C-c q" "C-c q")))
 (set-buffer-hint *shell-command-buffer* "")
 (set-buffer-hint *shell-output-buffer* "")
 

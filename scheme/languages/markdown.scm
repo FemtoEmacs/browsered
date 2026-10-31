@@ -121,20 +121,48 @@ text starts."
                     (and (< i le) (= (aref text i) 62) (md-skip-spaces text (+ i 1) le)))))
     (and after (column-at text after))))
 
-(define (md-inside-code-p text ls)
-  "Is the line at LS inside a ``` block (counting the fences above it)?"
+(define (md-open-fence text ls)
+  "If the line at LS is inside a ``` block, the start of its opening fence
+line (counting the fences above it), else #f."
   (let loop ((p 0) (open #f))
     (let ((nl (byte-position text 10 p)))
       (if (and nl (< p ls))
-          (loop (+ nl 1) (if (md-fence text p nl) (not open) open))
+          (loop (+ nl 1) (if (md-fence text p nl) (if open #f p) open))
           open))))
+
+(define (md-inside-code-p text ls)
+  "Is the line at LS inside a ``` block (counting the fences above it)?"
+  (and (md-open-fence text ls) #t))
+
+(define (md-code-place text ls)
+  "Inside a ``` block whose fence names a language (```scheme, ```c ...):
+(language . index of the block's first line), else #f."
+  (let* ((fence (md-open-fence text ls))
+         (fe (and fence (line-end-index text fence)))
+         (mark (and fence (md-fence text fence fe)))
+         (lang (and mark (md-code-language
+                          (byte-substring text (+ (md-skip-spaces text fence fe) (cdr mark)) fe)))))
+    (and lang (<= (+ fe 1) ls) (cons lang (+ fe 1)))))
+
+(define (md-code-indentation text ls)
+  "Inside a ``` block whose language has indentation rules, the column
+those rules give the line at LS, reading the block from its first line."
+  (let* ((place (md-code-place text ls))
+         (spec (and place (get *indentation* (string-downcase (language-name (car place))) #f))))
+    (and spec
+         (let* ((body (cdr place))
+                (ctx (make-context spec (byte-substring text body (length text)) 0 (- ls body))))
+           (and ctx (compute-indentation ctx))))))
 
 (define-indent-style 'markdown
   (lambda (ctx)
     (let* ((text (ictx-text ctx)) (ls (ictx-line ctx))
            (prev (previous-code-line text ls)))
       (cond ((not prev) 0)
-            ((md-inside-code-p text ls) (indentation-at text prev))
+            ;; code: by the rules of the fence's language (```scheme), or
+            ;; like the line above
+            ((md-inside-code-p text ls)
+             (or (md-code-indentation text ls) (indentation-at text prev)))
             ;; an item: where the item above starts (its sibling); but TAB on
             ;; an item already there nests it under the text of the one above
             ((let ((le (line-end-index text ls)))
@@ -218,6 +246,9 @@ after \"2. eggs\", \"> \" after a quotation.  Two values; the second is
 (define-language "Markdown"
   'extensions '(".md" ".markdown" ".mdown" ".mkd")
   'highlighter markdown-highlight)
+
+;; M-;, M-q and the rest follow the language of a ``` block
+(define-inner-language "Markdown" md-code-place)
 
 (define-indentation "Markdown"
   'style 'markdown 'width 2 'tabs #f

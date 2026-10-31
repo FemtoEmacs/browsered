@@ -1,4 +1,4 @@
-// Real Save As keystrokes, entirely in the disposable browser filesystem.
+// M-; (and TAB in Markdown ``` blocks) by real keystrokes, entirely in the disposable browser filesystem.
 const {chromium}=require('playwright');
 const http=require('http'),fs=require('fs'),assert=require('assert/strict');
 (async()=>{
@@ -24,7 +24,21 @@ const http=require('http'),fs=require('fs'),assert=require('assert/strict');
  await setup('(foo) ; old');await keys('Escape',';');assert.equal(await text(),JSON.stringify('(foo)'+' '.repeat(27)+'; old'));assert.equal(await scheme('(point)'), '34');
  await setup('café','unicode.py');await keys('Escape',';');assert.equal(await text(),JSON.stringify('café'+' '.repeat(28)+'# '));
  await setup('(foo)');await scheme('(set-mark 0)');await keys('Escape',';');assert.equal(await text(),JSON.stringify('(foo)'+' '.repeat(27)+'; '));
+ // Markdown: a ``` block follows its own language (M-;, region, TAB); prose has no comment syntax
+ const md='Text.\n\n```scheme\n(foo)\n```\n';
+ await setup(md,'notes.md');await scheme('(goto-char '+md.indexOf('(foo)')+')');await keys('Escape',';');
+ assert.equal(await text(),JSON.stringify(md.replace('(foo)','(foo)'+' '.repeat(27)+'; ')));
+ const two='```Scheme\n(a)\n(b)\n```\n';
+ await setup(two,'notes.md');await scheme('(begin (set-mark '+two.indexOf('(a)')+') (goto-char '+(two.indexOf('(b)')+3)+'))');await keys('Escape',';');
+ assert.equal(await text(),JSON.stringify('```Scheme\n;; (a)\n;; (b)\n```\n'));
+ const py='```python\nx = 1\n```\n';
+ await setup(py,'notes.md');await scheme('(goto-char '+py.indexOf('x')+')');await keys('Escape',';');
+ assert.equal(await text(),JSON.stringify(py.replace('x = 1','x = 1'+' '.repeat(27)+'# ')));
+ await setup(md,'notes.md');await keys('Escape',';');assert.equal(await text(),JSON.stringify(md));
+ const fib='```Scheme\n(define (fib n)\n    (if (< n 2) 1\n\n```\n';
+ await setup(fib,'notes.md');await scheme('(goto-char '+(fib.indexOf('1\n')+2)+')');await keys('Tab');
+ assert.equal(await text(),JSON.stringify(fib.replace('1\n\n','1\n        \n')));
  assert.deepEqual(errors,[]);
- console.log('PASS real M-;: comments, alignment, strings, blank line, region toggle, Python/C, Unicode, empty region');
+ console.log('PASS real M-;: comments, alignment, strings, blank line, region toggle, Python/C, Unicode, empty region, Markdown ``` blocks (M-;, region, TAB)');
  }finally{if(browser)await browser.close();server.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

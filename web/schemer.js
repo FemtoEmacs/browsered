@@ -13,7 +13,7 @@
   async function compileRequest(req) {
     var module=await initialize(),printed='';
     var request='('+JSON.stringify(req.source)+' ('+(req.globals||[]).join(' ')+') ('+
-      (req.defined||[]).join(' ')+') '+(req.legacy?'#t':'#f')+' #t)';
+      (req.defined||[]).join(' ')+') '+(req.legacy?'#t':'#f')+(req.editor===false?' #f)':' #t)');
     var host=schemerHost(function(text){printed+=text;},{
       read:function(path){if(path!==':schemer-request')throw new Error('Unexpected compiler file request');return request;},
       write:function(){throw new Error('Compiler cannot write files');},
@@ -88,7 +88,42 @@
     });
     return String(job.id);
   }
+  // Hot paths (src/web-hot.c, hot-of in web.scm): a program whose value is
+  // a procedure of three arguments, compiled in the background; then called
+  // synchronously, with the editor's memory as the program's.  Answers: the
+  // procedure's fixnum, -1 not compiled yet, -2 failed (compile or run).
+  var hots=[];
+  function hotCompile(source) {
+    var id=hots.length, hot={state:'compiling'};hots.push(hot);
+    (async function() {
+      try {
+        var bytes=await compileRequest({source:source,editor:false});
+        var host=schemerHost(function(){});
+        host.imports.host.memory=Module.browsered.memory();
+        var instance=(await WebAssembly.instantiate(bytes,host.imports)).instance;
+        host.setInstance(instance);
+        hot.value=instance.exports.main();hot.call3=instance.exports.call3;hot.state='ready';
+        telemetry.hotReady=(telemetry.hotReady||0)+1;
+      } catch(e) {
+        hot.state='failed';hot.error=String(e&&e.message||e);
+        telemetry.hotFailed=(telemetry.hotFailed||0)+1;
+        console.warn('Browsered: a hot path stays interpreted: '+hot.error);
+      }
+    })();
+    return id;
+  }
+  function hot(id,a,b,c) {
+    var h=hots[id];
+    if(!h||h.state==='failed') return -2;
+    if(h.state!=='ready') return -1;
+    try { var r=h.call3(h.value,a,b,c); return typeof r==='number'?r:-2; }
+    catch(e) { h.state='failed';h.error=String(e&&e.message||e);console.warn('Browsered: a hot path failed: '+h.error);return -2; }
+  }
+  function hotStatus() {
+    return JSON.stringify(hots.map(function(h,i){return {id:i,state:h.state,error:h.error};}));
+  }
   window.BrowseredSchemer={
+    hotCompile:hotCompile,hot:hot,hotStatus:hotStatus,
     begin:begin,
     next:function(id){var job=jobs.get(Number(id));if(job.events.length)return Promise.resolve(job.events.shift());return new Promise(function(resolve){job.waiter=resolve;});},
     reply:function(id,text){var job=jobs.get(Number(id)),done=job.reply;job.reply=null;done(text);},

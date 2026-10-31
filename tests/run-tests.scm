@@ -511,6 +511,23 @@
        (list (ind "Markdown" "- item" "x") (ind "Markdown" "  1. item" "x")
              (ind "Markdown" "- item" "- next") (ind "Markdown" "text" "x"))
        '(2 5 0 0))
+(check "Markdown: code in ``` indented by the fence's language"
+       (list (ind "Markdown" "Text." "```Scheme" "(define (fib n)" "    (if (< n 2) 1" "x")
+             (ind "Markdown" "```scheme" "x")
+             (ind "Markdown" "```c" "int f(void) {" "x")
+             (ind "Markdown" "```python" "def f(x):" "x"))
+       '(8 0 4 4))
+(check "Markdown: code in ``` with no known language, like the line above"
+       (list (ind "Markdown" "```" "    foo" "x") (ind "Markdown" "```text" "    foo" "x"))
+       '(4 4))
+(check "Markdown: the language of a ``` block, from its first line"
+       (let* ((t (lines "Text." "```Scheme" "(foo)" "```" "x"))
+              (in (md-code-place t (string-search "(foo)" t)))
+              (out (md-code-place t (- (length t) 1))))
+         (list (language-name (car in)) (cdr in) out))
+       (list "Scheme" (string-search "(foo)" (lines "Text." "```Scheme" "(foo)")) #f))
+(check "Markdown: after the block, prose again"
+       (ind "Markdown" "```scheme" "(define x" "  1)" "```" "x") 0)
 (check "Markdown: RET continues a list, an empty item ends it"
        (map (lambda (l) (call-with-values (lambda () (markdown-continuation l)) list))
             '("- milk" "  2. eggs" "- " "> said" "- [x] done" "plain"))
@@ -616,7 +633,7 @@
 
 (check "mode line: a window with buttons of its own"
        (list (mode-line-string "*shell-command*" 1 1 120) (map caddr (decoded-mode-line "*shell-command*" 1 1 120)))
-       (list "*shell-command*, L. 1 [?][SEND - C-c s][CLOSE - C-x 1]" '(#t #f #t #t #t)))
+       (list "*shell-command*, L. 1 [?][SEND - C-c s][CLOSE - C-c q]" '(#t #f #t #t #t)))
 (check "selection status replaces Select with COPY and DELETE"
        (begin (set! *menu-region* #t)
               (let ((r (map car (mode-line-buttons "a")))) (set! *menu-region* #f) r))

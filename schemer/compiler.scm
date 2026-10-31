@@ -22,6 +22,7 @@
 ;;;; program (only what the program uses).
 
 (define *max-args* 8)
+(define *uses-memory* #f)   ; the program reads or writes the host's memory ("host" "memory")
 
 ;;; ------------------------------------------------------------------
 ;;; Types
@@ -745,6 +746,9 @@ GROUP: variables of a letrec group, whose slots are filled later."
       ((%protect) (append (arg 0) (arg 1) (list (list 'call (helper '$protect)))))
       ((%number-char) (append (arg 0) (list (list 'ref.cast 'null T-CHAR) (list 'struct.get T-CHAR 0) (list 'call F-NUMBER-CHAR)) (unspec)))
       ((%editor) (append (arg 0) (list (list 'call F-EDITOR))))
+      ;; the bytes of a memory the host gives (the editor's): (%mem-u8 address)
+      ((%mem-u8) (set! *uses-memory* #t) (append (fix 0) (list (list 'i32.load8_u 0 0) 'ref.i31)))
+      ((%mem-u8-set!) (set! *uses-memory* #t) (append (fix 0) (fix 1) (list (list 'i32.store8 0 0)) (unspec)))
       ((%file) (append (fix 0) (arg 1) (arg 2) (list (list 'call F-FILE))))
       ((%table) (append (fix 0) (arg 1) (arg 2) (arg 3) (list (list 'call F-TABLE))))
       ((%number-end) (list (list 'call F-NUMBER-END) (list 'struct.new T-FLO)))

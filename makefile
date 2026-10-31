@@ -23,9 +23,9 @@ CPPFLAGS += -Isrc -Ifemtoscheme -Ifemtoscheme/llt
 #   gui.c, irene-dixe.c, app.c  Schememax's window and plot programs, and
 #             its main(), compiled below for each target
 CORE = $(filter-out src/term.c src/gui.c src/app.c src/irene-dixe.c src/web.c \
-                    src/web-main.c src/web-scheme.c src/web-layer.c src/web-fast.c src/web-sdl.c src/web-irene-main.c, \
+                    src/web-main.c src/web-scheme.c src/web-layer.c src/web-hot.c src/web-sdl.c src/web-irene-main.c, \
                     $(wildcard src/*.c))
-WEB = src/web.c src/web-main.c src/web-scheme.c src/web-layer.c src/web-fast.c
+WEB = src/web.c src/web-main.c src/web-scheme.c src/web-layer.c src/web-hot.c
 FEMTO = $(addprefix femtoscheme/, flisp.c builtins.c string.c equalhash.c table.c iostream.c)
 LLT = $(addprefix femtoscheme/llt/, bitvector.c hashing.c socket.c timefuncs.c ptrhash.c \
         utf8.c ios.c dirpath.c htable.c bitvector-ops.c int2str.c dump.c random.c lltinit.c)
@@ -150,7 +150,9 @@ check-web: Browsered.html codex-bridge
 	node tests/writing-keys-test.js
 	node tests/writing-search-test.js
 	node tests/text-layer-test.js
-	node tests/fast-test.js
+	node tests/hot-test.js
+	node tests/windows-resize-test.js
+	node tests/user-init-test.js
 	node tests/entrypoint-test.js
 	node tests/shell-folder-test.js
 	node tests/shell-tab-test.js
@@ -163,6 +165,7 @@ check-web: Browsered.html codex-bridge
 	node tests/claude-bridge-page-test.js
 	node tests/schemer-test.js
 	node tests/assistant-commands-test.js
+	node tests/assistant-windows-test.js
 
 # Take Schememax's core and scripts, from GitHub (FemtoEmacs/sbcl-rasp)
 # into build/sbcl-rasp, never from the user's own folders; SCHEMEMAX=path

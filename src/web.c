@@ -239,6 +239,8 @@ void screen_addch(int c)
 		cur_col = 0;
 	} else if (b == '\t') {
 		do put(' ', rev); while (cur_col % 8 != 0 && cur_col != 0);
+	} else if (b == '\b') {
+		if (cur_col > 0) cur_col--;     /* as a terminal: yesno's " n\b" */
 	} else if (b != '\r') {
 		put(b, rev);
 	}
@@ -332,32 +334,44 @@ void screen_pause(int ms)
 /* ------------------------------------------------------------------ */
 
 /*
- * Like curses' getch(), which refreshes before it waits.  A resize of
- * the page arrives as SCR_KEY_RESIZE, after the grid has been resized.
+ * Like curses' getch(), which refreshes before it waits.  A resize of the
+ * page, and Scheme the page asks to run, are dealt with here, and the
+ * editor never sees them as keys: the core answers SCR_KEY_RESIZE with a
+ * single window (resize_terminal), and the windows of C-x 2 were lost
+ * whenever the browser window changed size.  Here the windows keep their
+ * share (web_relayout, web-layer.c) and everything is drawn again.
  */
+extern void web_relayout(int rows);
+extern void web_redisplay(void);
 int screen_getch(void)
 {
 	int b;
 
-	if (dirty) render();
-	b = web_next_byte();
-	/*
-	 * -2: the page has Scheme to run.  It runs here, on the editor's
-	 * own stack, between keys; the editor then redraws as after a resize.
-	 */
-	while (b == -2) {
-		char *expr = web_take_eval();
-		if (expr) {
-			scheme_eval(expr);
-			free(expr);
+	for (;;) {
+		if (dirty) render();
+		b = web_next_byte();
+		if (b == -2) {
+			/* the page has Scheme to run: here, on the editor's own
+			 * stack, between keys */
+			char *expr = web_take_eval();
+			if (expr) {
+				scheme_eval(expr);
+				free(expr);
+			}
+			web_redisplay();
+			continue;
 		}
-		b = SCR_KEY_RESIZE;
+		if (b == SCR_KEY_RESIZE) {
+			int r = web_rows(), c = web_cols();
+			if (r != rows || c != cols) {
+				resize_grid(r, c);
+				web_relayout(r);
+			}
+			web_redisplay();
+			continue;
+		}
+		return b;
 	}
-	if (b == SCR_KEY_RESIZE) {
-		int r = web_rows(), c = web_cols();
-		if (r != rows || c != cols) resize_grid(r, c);
-	}
-	return b;
 }
 
 void screen_flushinp(void) { web_flush_input(); }
